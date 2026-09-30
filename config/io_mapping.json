@@ -1,0 +1,85 @@
+{
+  "digital_inputs": {
+    "manual_switch": "I_3",
+    "auto_switch": "I_4",
+    "level_switch_1": "I_1_i06",
+    "level_switch_2": "I_2_i06",
+    "level_switch_3": "I_3_i06",
+    "level_switch_4": "I_4_i06",
+    "level_switch_5": "I_5_i06",
+    "level_switch_6": "I_6_i06",
+    "level_switch_7": "I_7_i06",
+    "level_switch_8": "I_8_i06",
+    "level_switch_9": "I_9_i06",
+    "level_switch_10": "I_10_i06"
+  },
+  "flow_counters": {
+    "flow_sensor_1": "Counter_1",
+    "flow_sensor_2": "Counter_2"
+  },
+  "temperatures": {
+    "PT1_B2": {
+      "value": "RTDValue_1",
+      "status": "RTDStatus_1"
+    },
+    "PT2_B3": {
+      "value": "RTDValue_2",
+      "status": "RTDStatus_2"
+    },
+    "PT3_B4": {
+      "value": "RTDValue_1_i04",
+      "status": "RTDStatus_1_i04"
+    },
+    "PT4_B5": {
+      "value": "RTDValue_2_i04",
+      "status": "RTDStatus_2_i04"
+    },
+    "PT5_B6": {
+      "value": "RTDValue_1_i05",
+      "status": "RTDStatus_1_i05"
+    },
+    "PT6_B7": {
+      "value": "RTDValue_2_i05",
+      "status": "RTDStatus_2_i05"
+    }
+  },
+  "digital_outputs": {
+    "heater_1kw_E1_K2": "O_1",
+    "heater_3kw_E2_K1": "O_2",
+    "led_yellow_P2": "O_3",
+    "led_red_P3": "O_4",
+    "led_green_P1": "O_5",
+    "compressor_M3_3_K3_3": "O_6",
+    "pump_40w_1_M3_1_K3_1": "O_7",
+    "pump_40w_2_M3_2_K3_2": "O_8",
+    "pump_120w_1_M2_1_K6_1": "O_9",
+    "pump_120w_2_M2_2_K6_2": "O_10",
+    "ball_valve_3_Y3": "O_11",
+    "fan_M1_K4": "O_12",
+    "ball_valve_1_Y1": "O_13",
+    "ball_valve_2_Y2": "O_14"
+  },
+  "control_valve_Y4": {
+    "command": "OutputValue_1",
+    "command_status": "OutputStatus_1",
+    "feedback": "InputValue_1",
+    "feedback_status": "InputStatus_1"
+  },
+  "verification": {
+    "confirmed_digital_outputs": [
+      "O_1", "O_2", "O_3", "O_4", "O_5", "O_6",
+      "O_7", "O_8", "O_9", "O_10", "O_12"
+    ],
+    "provisional_valve_outputs": {
+      "ball_valve_1_Y1": "O_13",
+      "ball_valve_2_Y2": "O_14",
+      "ball_valve_3_Y3": "O_11"
+    },
+    "notes": [
+      "Heater relay assignments tested; heater operation not tested.",
+      "Valve identities must be confirmed before automatic operation.",
+      "Level switch assignments follow the wiring list; individual verification pending.",
+      "Temperature assignments follow the wiring list; sensor locations must be verified."
+    ]
+  }
+}
