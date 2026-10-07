@@ -70,7 +70,7 @@
       "O_1", "O_2", "O_3", "O_4", "O_5", "O_6",
       "O_7", "O_8", "O_9", "O_10", "O_12"
     ],
-    "provisional_valve_outputs": {
+    "valve_outputs_pending_identification": {
       "ball_valve_1_Y1": "O_13",
       "ball_valve_2_Y2": "O_14",
       "ball_valve_3_Y3": "O_11"

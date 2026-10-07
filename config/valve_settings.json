@@ -1,0 +1,9 @@
+{
+  "command_closed_raw": 4000,
+  "command_open_raw": 20000,
+  "feedback_closed_raw": 4054,
+  "feedback_open_raw": 20196,
+  "feedback_margin_percent": 2.0,
+  "position_tolerance_percent": 3.0,
+  "movement_timeout_seconds": 45.0
+}

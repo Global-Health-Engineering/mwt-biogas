@@ -1,0 +1,127 @@
+{
+  "physical_assignments_verified": false,
+  "levels": {
+    "manhole_water_present": "level_switch_1",
+    "line_1_tank_low": "level_switch_2",
+    "line_2_tank_low": "level_switch_3",
+    "line_1_tank_high": "level_switch_4",
+    "line_2_tank_high": "level_switch_5",
+    "line_1_tank_overflow": "level_switch_6",
+    "line_2_tank_overflow": "level_switch_7",
+    "effluent_tank_low": "level_switch_8",
+    "effluent_tank_high": "level_switch_9"
+  },
+  "unassigned_level_inputs": [
+    "level_switch_10"
+  ],
+  "temperatures": {
+    "PT1_B2": {
+      "role": "heat_exchanger_cold_effluent_inlet",
+      "location": "Cold effluent entering the heat exchanger"
+    },
+    "PT2_B3": {
+      "role": "pasteurizer_effluent_inlet",
+      "location": "Warm effluent leaving the heat exchanger and entering the pasteurizer"
+    },
+    "PT3_B4": {
+      "role": "pasteurizer_effluent_outlet",
+      "location": "Hot effluent leaving the pasteurizer and entering the heat exchanger"
+    },
+    "PT4_B5": {
+      "role": "heat_exchanger_cooled_effluent_outlet",
+      "location": "Cooled treated effluent leaving the heat exchanger"
+    },
+    "PT5_B6": {
+      "role": "biogas_heater_water_inlet",
+      "location": "Water leaving the pasteurizer and entering the biogas heater"
+    },
+    "PT6_B7": {
+      "role": "pasteurizer_heating_water_inlet",
+      "location": "Water leaving the biogas heater and entering the pasteurizer"
+    }
+  },
+  "primary_pasteurization_temperature": "PT3_B4",
+  "flows": {
+    "flow_sensor_1": {
+      "role": "line_1_effluent_transfer",
+      "location": "Effluent transfer line 1",
+      "purpose": "Measure line 1 flow and transferred volume"
+    },
+    "flow_sensor_2": {
+      "role": "line_2_effluent_transfer",
+      "location": "Effluent transfer line 2",
+      "purpose": "Measure line 2 flow and transferred volume"
+    }
+  },
+  "mode_selector": {
+    "manual_contact": "manual_switch",
+    "auto_contact": "auto_switch"
+  },
+  "pumps": {
+    "line_1_transfer": "pump_120w_1_M2_1_K6_1",
+    "line_2_transfer": "pump_120w_2_M2_2_K6_2",
+    "manhole_drain": "pump_40w_1_M3_1_K3_1",
+    "biogas_heating_circulation": "pump_40w_2_M3_2_K3_2"
+  },
+  "ball_valves": {
+    "line_1_overflow": {
+      "output": "ball_valve_1_Y1",
+      "purpose": "Relieve tank 1 overflow",
+      "power_loss_position": "closed"
+    },
+    "line_2_overflow": {
+      "output": "ball_valve_2_Y2",
+      "purpose": "Relieve tank 2 overflow",
+      "power_loss_position": "closed"
+    },
+    "pasteurization_isolation": {
+      "output": "ball_valve_3_Y3",
+      "purpose": "Stop effluent flow when pasteurization is disabled or unsafe",
+      "power_loss_position": "closed"
+    }
+  },
+  "control_valve": {
+    "equipment": "control_valve_Y4",
+    "purpose": "Regulate effluent flow according to pasteurizer outlet temperature",
+    "control_temperature": "PT3_B4",
+    "power_loss_position": "hold_last_position"
+  },
+  "heaters": {
+    "startup_water_preheater": {
+      "output": "heater_3kw_E2_K1",
+      "rated_power_w": 3000,
+      "purpose": "Preheat water during pasteurizer initialization"
+    },
+    "process_assist": {
+      "output": "heater_1kw_E1_K2",
+      "rated_power_w": 1000,
+      "purpose": "Assist process heating when biogas heat is insufficient"
+    }
+  },
+  "biogas_compressor": {
+    "output": "compressor_M3_3_K3_3",
+    "purpose": "Assist biogas supply pressure if required by the burner",
+    "operating_strategy": null
+  },
+  "cabinet_fan": {
+    "output": "fan_M1_K4",
+    "purpose": "Allow local temperature-controlled cabinet cooling, with a software disable option",
+    "local_temperature_relay_present": true,
+    "output_true_action": "disable_fan",
+    "output_false_action": "allow_temperature_relay_control"
+  },
+  "indicators": {
+    "pasteurizing": {
+      "output": "led_green_P1",
+      "meaning": "Actively pasteurizing"
+    },
+    "warning": {
+      "output": "led_yellow_P2",
+      "meaning": "Attention required; pasteurization may continue"
+    },
+    "fault": {
+      "output": "led_red_P3",
+      "meaning": "Major fault; pasteurization stopped and immediate attention required"
+    }
+  }
+}

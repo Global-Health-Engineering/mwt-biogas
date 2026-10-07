@@ -1,0 +1,52 @@
+{
+  "level_switch_1": {
+    "enabled": true,
+    "active_high": true,
+    "debounce_seconds": 0.2
+  },
+  "level_switch_2": {
+    "active_high": true,
+    "debounce_seconds": 0.2,
+    "enabled": true
+  },
+  "level_switch_3": {
+    "active_high": true,
+    "debounce_seconds": 0.2,
+    "enabled": true
+  },
+  "level_switch_4": {
+    "active_high": true,
+    "debounce_seconds": 0.2,
+    "enabled": true
+  },
+  "level_switch_5": {
+    "active_high": true,
+    "debounce_seconds": 0.2,
+    "enabled": true
+  },
+  "level_switch_6": {
+    "active_high": true,
+    "debounce_seconds": 0.2,
+    "enabled": true
+  },
+  "level_switch_7": {
+    "active_high": true,
+    "debounce_seconds": 0.2,
+    "enabled": true
+  },
+  "level_switch_8": {
+    "active_high": true,
+    "debounce_seconds": 0.2,
+    "enabled": true
+  },
+  "level_switch_9": {
+    "active_high": true,
+    "debounce_seconds": 0.2,
+    "enabled": true
+  },
+  "level_switch_10": {
+    "active_high": true,
+    "debounce_seconds": 0.2,
+    "enabled": true
+  }
+}

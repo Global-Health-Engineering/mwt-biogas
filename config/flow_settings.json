@@ -1,0 +1,14 @@
+{
+  "flow_sensor_1": {
+    "pulses_per_litre": null,
+    "calibration_confirmed": false,
+    "max_pulse_rate_hz": null,
+    "max_sample_gap_seconds": 3.0
+  },
+  "flow_sensor_2": {
+    "pulses_per_litre": null,
+    "calibration_confirmed": false,
+    "max_pulse_rate_hz": null,
+    "max_sample_gap_seconds": 3.0
+  }
+}
