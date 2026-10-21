@@ -1,0 +1,6 @@
+{
+  "water_temperature_sensor": "PT5_B6",
+  "cold_start_below_celsius": 60.0,
+  "preheat_complete_at_celsius": 64.0,
+  "thresholds_validated": false
+}

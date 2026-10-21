@@ -1,0 +1,103 @@
+{
+  "model_validated": false,
+  "target_log_reduction": 3.0,
+  "geometry": {
+    "material": "stainless_steel_316",
+    "connection": "parallel",
+    "tube_outer_diameter_m": 0.028,
+    "wall_thickness_m": 0.002115135171401524,
+    "branch_lengths_m": [40.0, 40.0],
+    "coil_diameters_m": [0.495, 0.495],
+    "reported_total_volume_litres": 35.5,
+    "volume_basis": "calculate_from_tube_dimensions"
+  },
+  "hydraulics": {
+    "branch_mass_flow_fractions": [
+      0.5,
+      0.5
+    ],
+    "flow_split_scenarios": [
+      [
+        0.5,
+        0.5
+      ],
+      [
+        0.6,
+        0.4
+      ],
+      [
+        0.7,
+        0.3
+      ]
+    ],
+    "flow_relative_error_bound": null
+  },
+  "fluid": {
+    "property_model": "liquid_water",
+    "basis": "assumed_for_diluted_filtered_effluent"
+  },
+  "heating_water": {
+    "estimated_flow_lph": 900.0,
+    "flow_scenarios_lph": [
+      600.0,
+      900.0,
+      1200.0
+    ],
+    "bath_temperature_model": "PT5"
+  },
+  "sensors": {
+    "effluent_flow": "flow_sensor_3",
+    "flowmeter_temperature": "PT1_B2",
+    "effluent_inlet_temperature": "PT2_B3",
+    "effluent_outlet_temperature": "PT3_B4",
+    "heating_water_outlet_temperature": "PT5_B6",
+    "heating_water_inlet_temperature": "PT6_B7",
+    "temperature_error_bound_c": null,
+    "bath_temperature": "PT5_B6"
+  },
+  "kinetics": {
+    "model": "ziemba_stepwise_capped",
+    "source": "Ziemba and Peccia 2011, DOI 10.1016/j.watres.2011.06.014",
+    "rate_table": [
+      {"temperature_c": 50.0, "k_per_hour": 1.4},
+      {"temperature_c": 55.0, "k_per_hour": 6.8},
+      {"temperature_c": 60.0, "k_per_hour": 650.0}
+    ],
+    "below_table": "zero_credit",
+    "above_table": "cap_at_highest_rate"
+  },
+  "thermal": {
+    "model": "steady_uniform_bath",
+    "segments_per_branch": 200,
+    "overall_u_outer_w_m2k": [
+      25.0,
+      25.0
+    ],
+    "specific_heat_j_kgk": 4180.0,
+    "coefficient_basis": "illustrative_assumption_not_validated"
+  },
+  "heat_transfer": {
+    "coil_heights_m": [
+      1.2,
+      1.2
+    ],
+    "coil_height_basis": "connection_spacing_proxy",
+    "steel_conductivity_w_mk": 15.0,
+    "fouling_resistance_outer_m2k_w": 0.0,
+    "property_pressure_mpa": 0.1,
+    "wall_root_tolerance_c": 1e-06,
+    "max_iterations": 200,
+    "bulk_temperature_tolerance_c": 0.01,
+    "outlet_temperature_tolerance_c": 0.01,
+    "relaxation_factor": 0.5
+  },
+  "tracking": {
+    "reference_density_kg_m3": 998.2,
+    "specific_heat_j_kgk": 4180.0,
+    "fixed_u_outer_w_m2k": 136.55,
+    "max_step_s": 2.5,
+    "initial_temperature_c": 20.0,
+    "coefficient_equal_temperature_band_c": 0.01,
+    "coefficient_update_interval_s": 10.0
+  }
+}

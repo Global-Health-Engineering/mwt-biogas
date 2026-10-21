@@ -51,6 +51,11 @@
       "role": "line_2_effluent_transfer",
       "location": "Effluent transfer line 2",
       "purpose": "Measure line 2 flow and transferred volume"
+    },
+    "flow_sensor_3": {
+      "role": "pasteurizer_effluent_flow",
+      "location": "Cold effluent inlet before the heat exchanger",
+      "purpose": "Measure flow through the pasteurization line and cumulative throughput"
     }
   },
   "mode_selector": {

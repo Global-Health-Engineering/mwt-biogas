@@ -15,7 +15,8 @@
   },
   "flow_counters": {
     "flow_sensor_1": "Counter_1",
-    "flow_sensor_2": "Counter_2"
+    "flow_sensor_2": "Counter_2",
+    "flow_sensor_3": "Counter_5"
   },
   "temperatures": {
     "PT1_B2": {
@@ -67,8 +68,17 @@
   },
   "verification": {
     "confirmed_digital_outputs": [
-      "O_1", "O_2", "O_3", "O_4", "O_5", "O_6",
-      "O_7", "O_8", "O_9", "O_10", "O_12"
+      "O_1",
+      "O_2",
+      "O_3",
+      "O_4",
+      "O_5",
+      "O_6",
+      "O_7",
+      "O_8",
+      "O_9",
+      "O_10",
+      "O_12"
     ],
     "valve_outputs_pending_identification": {
       "ball_valve_1_Y1": "O_13",
