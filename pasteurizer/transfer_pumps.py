@@ -1,32 +1,28 @@
 """Decide transfer-pump operation without writing to hardware."""
 
-import json
-import time
-from pathlib import Path
+from pasteurizer.config import PlantConfig, load_config
+from pasteurizer.contracts import EquipmentRequest, SignalSnapshot
+from pasteurizer.modes import Mode
+
+
+LINES = (1, 2)
+
+
+def command_name(line: int) -> str:
+    """OutputCommands field controlled for this line."""
+    return f"transfer_pump_{line}"
 
 
 class TransferPumpController:
-    def __init__(self, roles_path=None):
-        if roles_path is None:
-            roles_path = (
-                Path(__file__).resolve().parents[1]
-                / "config/equipment_roles.json"
-            )
-
-        with open(roles_path) as file:
-            roles = json.load(file)
-
-        self.level_roles = roles["levels"]
-        self.outputs = {
-            line: roles["pumps"][f"line_{line}_transfer"]
-            for line in (1, 2)
-        }
+    def __init__(self, config: PlantConfig | None = None):
+        self.config = config if config is not None else load_config()
+        self.level_roles = self.config.level_roles
         self.reset()
 
     def reset(self):
         self.mode = None
-        self.running = {1: False, 2: False}
-        self.manual_requests = {1: False, 2: False}
+        self.running = {line: False for line in LINES}
+        self.manual_requests = {line: False for line in LINES}
 
     def request_manual(self, line, enabled):
         """Called later by the webapp; requests still pass safety checks."""
@@ -34,74 +30,72 @@ class TransferPumpController:
             raise ValueError("Line must be 1 or 2")
         if not isinstance(enabled, bool):
             raise ValueError("enabled must be a boolean")
-        if self.mode != "MANUAL":
+        if self.mode != Mode.MANUAL:
             raise RuntimeError("Manual commands require MANUAL mode")
 
         self.manual_requests[line] = enabled
 
-    def process(self, signals, *, heater_3kw_active):
-        """heater_3kw_active is the last commanded heater state."""
-        mode_state = signals.get("mode", {})
-        mode = (
-            mode_state.get("value")
-            if mode_state.get("valid") is True
-            else "INVALID"
-        )
+    def process(self, signals: SignalSnapshot, *,
+                heater_3kw_active, overridden=frozenset()) -> dict[str, EquipmentRequest]:
+        """heater_3kw_active: the 3 kW heater is or may still be on.
 
-        sampled_at = signals.get("sampled_at")
-        fresh = (
-            isinstance(sampled_at, (int, float))
-            and 0 <= time.monotonic() - sampled_at <= 0.5
-        )
+        overridden: level switches substituted by a commissioning override;
+        plausibility checks that depend on them are suppressed.
+        Returns requests keyed by OutputCommands field name.
+        """
+        mode = signals.mode.value if signals.mode.valid else Mode.INVALID
+        available = signals.available
 
         transition = mode != self.mode
-        if transition or not fresh or signals.get("sampling_interrupted"):
+        if transition or not available:
             self.reset()
 
         self.mode = mode
-        levels = signals.get("levels", {})
 
         def level(role):
-            name = self.level_roles[role]
-            reading = levels.get(name, {})
-            reached = reading.get("reached")
-            if reading.get("valid") is not True:
-                return None
-            return reached if isinstance(reached, bool) else None
+            return signals.level(self.level_roles[role])
 
         destination_high = level("effluent_tank_high")
         decisions = {}
 
-        for line in (1, 2):
+        for line in LINES:
             low = level(f"line_{line}_tank_low")
             high = level(f"line_{line}_tank_high")
             reason = None
+            blocker = None
 
-            if not fresh or signals.get("sampling_interrupted"):
-                reason = "Sampling unavailable or interrupted"
-            elif mode not in ("AUTO", "MANUAL"):
-                reason = "Mode OFF or invalid"
+            if not available:
+                reason, blocker = ("Sampling unavailable or interrupted",
+                                   "SAMPLING_UNAVAILABLE")
+            elif mode not in (Mode.AUTO, Mode.MANUAL):
+                reason, blocker = "Mode OFF or invalid", "MODE"
             elif transition:
-                reason = "Mode changed; requests cleared"
+                reason, blocker = "Mode changed; requests cleared", "MODE_CHANGED"
             elif not isinstance(heater_3kw_active, bool):
-                reason = "3 kW heater state unavailable"
+                reason, blocker = ("3 kW heater state unavailable",
+                                   "HEATER_3KW_STATE_UNKNOWN")
             elif heater_3kw_active:
-                reason = "3 kW heater active"
+                reason, blocker = "3 kW heater active", "HEATER_3KW_ACTIVE"
             elif destination_high is None or low is None:
-                reason = "Required level reading unavailable"
+                reason, blocker = ("Required level reading unavailable",
+                                   "LEVEL_UNAVAILABLE")
             elif destination_high:
-                reason = "Effluent tank high"
-            elif high is True and low is False:
-                reason = "Source level switches inconsistent"
+                reason, blocker = "Effluent tank high", "DESTINATION_HIGH"
+            elif (high is True and low is False
+                  and self.level_roles[f"line_{line}_tank_high"] not in overridden
+                  and self.level_roles[f"line_{line}_tank_low"] not in overridden):
+                reason, blocker = ("Source level switches inconsistent",
+                                   "SOURCE_LEVELS_INCONSISTENT")
             elif not low:
-                reason = "Source tank below low switch"
-            elif mode == "AUTO" and high is None:
-                reason = "Source high-level reading unavailable"
+                reason, blocker = "Source tank below low switch", "SOURCE_LOW"
+            elif mode == Mode.AUTO and high is None:
+                reason, blocker = ("Source high-level reading unavailable",
+                                   "LEVEL_UNAVAILABLE")
 
             if reason is not None:
                 self.running[line] = False
                 self.manual_requests[line] = False
-            elif mode == "MANUAL":
+            elif mode == Mode.MANUAL:
                 self.running[line] = self.manual_requests[line]
                 reason = (
                     "Manual start requested"
@@ -115,10 +109,10 @@ class TransferPumpController:
                     if self.running[line] else "Waiting for high level"
                 )
 
-            decisions[f"line_{line}_transfer"] = {
-                "output": self.outputs[line],
-                "on": self.running[line],
-                "reason": reason,
-            }
+            decisions[command_name(line)] = EquipmentRequest(
+                on=self.running[line],
+                reason=reason,
+                inhibited_by=(blocker,) if blocker else (),
+            )
 
         return decisions

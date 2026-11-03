@@ -9,8 +9,8 @@ import math
 
 @dataclass(frozen=True)
 class ValveFeedback:
-    raw: int
-    status: int
+    raw: int | None
+    status: int | None
     position_percent: float | None
     valid: bool
     error: str | None
@@ -138,4 +138,4 @@ class ValveSupervisor:
         if now - self._outside_since >= self.timeout:
             return "POSITION_TIMEOUT"
 
-        return "MOVING_OR_SETTLING"
+        return "MOVING_OR_SETTLING"

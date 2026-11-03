@@ -1,23 +1,41 @@
-"""Read one shared snapshot of the configured hardware."""
+"""Layer 1: read one shared snapshot of the configured hardware.
+
+This is the only module (together with the future output writer) that knows
+RevPi process-image channel names. The snapshot is raw: no conversion, no
+validation beyond "the read succeeded".
+"""
 
 import json
-import time
 from pathlib import Path
 
-import revpimodio2
+from pasteurizer.clock import Clock, MonotonicClock
 
 
 class HardwareReader:
-    def __init__(self, mapping_path=None):
-        if mapping_path is None:
-            mapping_path = (
-                Path(__file__).resolve().parents[1]
-                / "config"
-                / "io_mapping.json"
-            )
+    data_source = "LIVE"        # recorded with every historian record
 
-        with open(mapping_path) as file:
-            self.mapping = json.load(file)
+    def __init__(self, mapping_path=None, *, mapping=None, clock: Clock | None = None):
+        """Pass either a mapping dict (e.g. PlantConfig.io_mapping) or a path.
+
+        With neither, config/io_mapping.json is used.
+        """
+        # Imported here so that simulations can use the package without
+        # revpimodio2 installed.
+        import revpimodio2
+
+        if mapping is None:
+            if mapping_path is None:
+                mapping_path = (
+                    Path(__file__).resolve().parents[1]
+                    / "config"
+                    / "io_mapping.json"
+                )
+            with open(mapping_path) as file:
+                mapping = json.load(file)
+
+        self.mapping = mapping
+        self.clock = clock if clock is not None else MonotonicClock()
+        self.sequence = 0
 
         self.rpi = revpimodio2.RevPiModIO(
             autorefresh=False,
@@ -48,13 +66,15 @@ class HardwareReader:
         if not self.rpi.readprocimg():
             raise RuntimeError("Hardware read failed; snapshot unavailable")
 
-        sampled_at = time.monotonic()
+        sampled_at = self.clock.monotonic()
+        self.sequence += 1
 
         def value(name):
             return self.channels[name].value
 
         return {
             "sampled_at": sampled_at,
+            "sequence": self.sequence,
             "module_status": {
                 "dio": int(value("Status")),
                 "di": int(value("Status_i06")),

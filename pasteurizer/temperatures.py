@@ -5,15 +5,25 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class TemperatureReading:
-    raw: int
-    status: int
+    raw: int | None
+    status: int | None
     celsius: float | None
     valid: bool
     error: str | None
 
 
-def process_temperature(raw: int, status: int) -> TemperatureReading:
-    """Convert an unscaled RevPi RTD reading to degrees Celsius."""
+def process_temperature(
+    raw: int,
+    status: int,
+    plausible_min_c: float | None = None,
+    plausible_max_c: float | None = None,
+) -> TemperatureReading:
+    """Convert an unscaled RevPi RTD reading to degrees Celsius.
+
+    The optional plausible range describes what the process can physically
+    produce at this sensor. A value outside it is reported invalid rather
+    than passed on as a believable temperature.
+    """
 
     raw = int(raw)
     status = int(status)
@@ -47,10 +57,25 @@ def process_temperature(raw: int, status: int) -> TemperatureReading:
             error="temperature outside PT100 range",
         )
 
+    if (
+        (plausible_min_c is not None and celsius < plausible_min_c)
+        or (plausible_max_c is not None and celsius > plausible_max_c)
+    ):
+        return TemperatureReading(
+            raw=raw,
+            status=status,
+            celsius=None,
+            valid=False,
+            error=(
+                f"{celsius:.1f} C outside plausible range "
+                f"{plausible_min_c}..{plausible_max_c} C"
+            ),
+        )
+
     return TemperatureReading(
         raw=raw,
         status=status,
         celsius=celsius,
         valid=True,
         error=None,
-    )
+    )

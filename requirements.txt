@@ -1,0 +1,9 @@
+# Target runtime: Python 3.11.2 on the Revolution Pi.
+#
+# Versions are not pinned yet. On the RevPi, run
+#   python3 -m pip freeze | grep -iE "revpimodio2|scipy|iapws"
+# (or `apt list --installed | grep -i revpimodio` if installed via apt)
+# and replace the lines below with the exact versions found there.
+revpimodio2   # hardware access (pasteurizer/hardware.py, monitors)
+scipy         # treatment_model root finding
+iapws         # treatment_model water properties

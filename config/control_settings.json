@@ -1,0 +1,97 @@
+{
+  "settings_validated": false,
+  "model_control_enabled": false,
+  "fallback_enabled": true,
+  "start": {
+    "y4_closed_tolerance_percent": 3.0
+  },
+  "preheat": {
+    "max_duration_s": 10800.0
+  },
+  "model": {
+    "target_log": 3.0,
+    "operating_reserve_log": 0.5,
+    "entry_reserve_log": 1.0,
+    "max_result_age_s": 3.0,
+    "return_check_s": 60.0,
+    "ready_pt5_min_c": 75.0,
+    "ready_dwell_s": 60.0
+  },
+  "flow_pi": {
+    "kp_percent_per_l_min": null,
+    "ki_percent_per_l_min_s": null,
+    "max_flow_l_min": null,
+    "slew_percent_per_s": null,
+    "flow_rate_limit_l_min_per_s": null,
+    "tuning_validated": false
+  },
+  "fallback": {
+    "entry_pt5_min_c": 80.0,
+    "dwell_s": 60.0,
+    "pt3_target_c": 80.0,
+    "hold_band_c": 0.5,
+    "step_percent": 1.0,
+    "step_interval_s": 5.0,
+    "start_opening_percent": 10.0,
+    "min_opening_percent": 0.0,
+    "max_opening_percent": 100.0,
+    "max_flow_l_min": 1.0,
+    "max_flow_validated_for_hardware": false
+  },
+  "treatment_stop": {
+    "pt3_min_c": 65.0,
+    "pt3_confirm_s": 2.0,
+    "min_flow_l_min": 0.3,
+    "startup_grace_s": 10.0,
+    "supply_wait_s": 120.0,
+    "retry_wait_s": 60.0,
+    "retry_grace_s": 10.0,
+    "retry_restore_s": 600.0,
+    "interruption_count": 3,
+    "interruption_window_s": 1800.0
+  },
+  "heater_1kw": {
+    "normal_on_below_c": 75.0,
+    "normal_off_at_c": 77.0,
+    "fallback_on_below_c": 82.0,
+    "fallback_off_at_c": 84.0,
+    "min_on_s": 60.0,
+    "min_off_s": 60.0
+  },
+  "faults": {
+    "overtemperature_trip_c": 90.0,
+    "overtemperature_reset_below_c": 85.0,
+    "pt3_invalid_s": 5.0,
+    "pt5_pt6_invalid_s": 10.0,
+    "flow3_invalid_s": 10.0,
+    "selector_invalid_s": 0.6,
+    "transfer_flow_invalid_s": 10.0
+  },
+  "transfer_flow": {
+    "no_flow_max_l_min": 0.1,
+    "low_flow_below_l_min": 1.0,
+    "grace_s": 10.0,
+    "persistence_s": 10.0
+  },
+  "overflow": {
+    "min_open_s": 30.0,
+    "close_after_clear_s": 10.0
+  },
+  "manual": {
+    "request_expiry_s": 30.0,
+    "override_expiry_s": 10.0
+  },
+  "watchdog": {
+    "heartbeat_timeout_s": 1.0
+  },
+  "logging": {
+    "periodic_interval_s": 5.0,
+    "event_retention_days": 365,
+    "sample_retention_days": 90,
+    "max_database_mb": 2000,
+    "queue_capacity": 5000,
+    "write_batch_size": 200,
+    "flush_interval_s": 1.0,
+    "retry_interval_s": 5.0
+  }
+}

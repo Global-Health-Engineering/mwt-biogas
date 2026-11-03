@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mwt-biogas · Plant view (read-only)</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <span id="source" class="badge badge-unknown">SOURCE UNKNOWN</span>
+  <span id="conn" class="conn conn-waiting">Waiting for the controller…</span>
+  <span id="mode" class="chip">Mode —</span>
+  <span id="state" class="state-text">—</span>
+  <span class="lamps">
+    <span id="lamp-green" class="plant-lamp lamp-green mode-unknown"></span><span id="lamp-green-text" class="lamp-text"></span>
+    <span id="lamp-yellow" class="plant-lamp lamp-yellow mode-unknown"></span><span id="lamp-yellow-text" class="lamp-text"></span>
+    <span id="lamp-red" class="plant-lamp lamp-red mode-unknown"></span><span id="lamp-red-text" class="lamp-text"></span>
+  </span>
+  <span id="fan" class="chip">Cabinet fan: unknown</span>
+  <span class="chip role">Read-only (no login)</span>
+  <span id="clock" class="clock"></span>
+</header>
+<div id="gui-error" class="gui-error"></div>
+<nav>
+  <button data-tab="edibl">EDiBl</button>
+  <button data-tab="pasteurizer">Pasteurizer</button>
+  <button data-tab="trends">Trends</button>
+  <span class="spacer"></span>
+  <button id="open-log" class="secondary">Open log in new window ↗</button>
+</nav>
+<main>
+  <section class="views">
+    <div id="view-edibl" class="view"></div>
+    <div id="view-pasteurizer" class="view" hidden></div>
+    <div id="view-trends" class="view" hidden>
+      <div class="trend-controls">
+        <div id="trend-series" class="series"></div>
+        <label>Range <select id="trend-range">
+          <option value="15">15 min</option><option value="60" selected>1 h</option>
+          <option value="480">8 h</option><option value="1440">24 h</option><option value="10080">7 days</option>
+        </select></label>
+        <label title="Scale the time axis to the first and last sample in the chosen range">
+          <input type="checkbox" id="trend-fit"> Fit available data</label>
+        <button id="trend-refresh" class="secondary">Refresh</button>
+      </div>
+      <div id="trend-panels"></div>
+    </div>
+  </section>
+  <aside id="side"><div id="card" class="card"></div></aside>
+</main>
+<section id="alarm-panel" class="alarms">
+  <div class="alarms-head"><h2 id="alarm-title">Active alarms</h2><span id="alarm-count" class="muted"></span>
+    <span class="muted">Historical events: open the log window.</span></div>
+  <table>
+    <thead><tr><th>Severity</th><th>Raised</th><th>Equipment</th><th>Description</th><th>Consequence</th><th>Status</th></tr></thead>
+    <tbody id="alarm-rows"></tbody>
+  </table>
+</section>
+<footer>Anaerobic Digester with Pasteurisation, Mzuzu · ETH Zurich, Global Health Engineering ·
+  layout after GUI_V2 / P&amp;ID drawing 02 · read-only GUI, no plant commands · <span id="footer-config"></span></footer>
+<script src="/static/common.js"></script>
+<script src="/static/views.js"></script>
+<script src="/static/trends.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

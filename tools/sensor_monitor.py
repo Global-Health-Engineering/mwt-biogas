@@ -43,7 +43,7 @@ def main():
                             timezone.utc
                         ).isoformat(),
                         "snapshot": snapshot,
-                        "signals": signals,
+                        "signals": signals.to_dict(),
                     }
 
                     logfile.write(
@@ -73,4 +73,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main()

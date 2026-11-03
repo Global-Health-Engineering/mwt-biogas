@@ -1,0 +1,30 @@
+{
+  "settings_validated": false,
+  "preheat_exclusion": {
+    "heater": "heater_3kw",
+    "excluded_outputs": [
+      "transfer_pump_1",
+      "transfer_pump_2",
+      "heater_1kw",
+      "heating_circulation",
+      "manhole_drain",
+      "biogas_compressor"
+    ],
+    "switching_pause_seconds": 10.0
+  },
+  "energy": {
+    "battery_level_available": false,
+    "min_battery_percent": {
+      "heater_3kw": null,
+      "heater_1kw": null
+    }
+  },
+  "isolation_valve": {
+    "open_before_control_valve_seconds": 10.0
+  },
+  "compressor_enabled": false,
+  "cabinet_fan_disable_allowed": false,
+  "indicators": {
+    "heat_up_blink_period_seconds": 1.0
+  }
+}

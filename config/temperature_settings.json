@@ -1,0 +1,11 @@
+{
+  "ranges_validated": false,
+  "sensors": {
+    "PT1_B2": {"plausible_min_c": 0.0, "plausible_max_c": 100.0},
+    "PT2_B3": {"plausible_min_c": 0.0, "plausible_max_c": 100.0},
+    "PT3_B4": {"plausible_min_c": 0.0, "plausible_max_c": 100.0},
+    "PT4_B5": {"plausible_min_c": 0.0, "plausible_max_c": 100.0},
+    "PT5_B6": {"plausible_min_c": 0.0, "plausible_max_c": 100.0},
+    "PT6_B7": {"plausible_min_c": 0.0, "plausible_max_c": 100.0}
+  }
+}

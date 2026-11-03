@@ -4,3 +4,8 @@ __pycache__/
 logs/
 *.pyc
 *.bak
+# Historian databases and CSV exports (generated)
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+exports/

@@ -1,115 +1,106 @@
 """Select startup heating stages without writing to hardware."""
 
-import json
+from dataclasses import dataclass
+from enum import Enum
 import math
-import time
-from pathlib import Path
+
+from pasteurizer.config import PlantConfig, load_config
+from pasteurizer.contracts import EquipmentRequest, SignalSnapshot
+from pasteurizer.modes import Mode
+
+
+class StartupStage(str, Enum):
+    IDLE = "IDLE"
+    PREHEAT_3KW = "PREHEAT_3KW"
+    SECOND_STAGE = "SECOND_STAGE"
+    FAULT = "FAULT"
+
+
+@dataclass(frozen=True)
+class StartupDecision:
+    stage: StartupStage
+    fault: str | None
+    reason: str
+    heater_3kw: EquipmentRequest
+    block_transfer_pumps: bool
+    block_heater_1kw: bool
+    block_heating_circulation: bool
+    second_stage_permitted: bool
+    pasteurization_permitted: bool
 
 
 class StartupController:
-    def __init__(self, config_directory=None):
-        if config_directory is None:
-            config_directory = (
-                Path(__file__).resolve().parents[1] / "config"
-            )
+    def __init__(self, config: PlantConfig | None = None):
+        self.config = config if config is not None else load_config()
+        settings = self.config.startup
 
-        def load(name):
-            with open(Path(config_directory) / name) as file:
-                return json.load(file)
-
-        settings = load("startup_settings.json")
-        roles = load("equipment_roles.json")
-
-        self.sensor = settings["water_temperature_sensor"]
-        self.cold_threshold = settings["cold_start_below_celsius"]
-        self.complete_threshold = settings["preheat_complete_at_celsius"]
-
-        if not all(
-            isinstance(value, (int, float))
-            and not isinstance(value, bool)
-            and math.isfinite(value)
-            for value in (self.cold_threshold, self.complete_threshold)
-        ):
-            raise ValueError("Startup thresholds must be finite numbers")
-
-        if self.cold_threshold >= self.complete_threshold:
-            raise ValueError("Cold threshold must be below completion threshold")
-
-        self.heater_output = roles["heaters"]["startup_water_preheater"]["output"]
+        self.sensor = settings.water_temperature_sensor
+        self.cold_threshold = settings.cold_start_below_celsius
+        self.complete_threshold = settings.preheat_complete_at_celsius
         self.reset()
 
     def reset(self):
         """Explicitly reset the startup sequence, not on every sample."""
-        self.stage = "IDLE"
+        self.stage = StartupStage.IDLE
         self.fault = None
 
-    def process(self, signals, *, heating_permitted, power_ready):
+    def process(self, signals: SignalSnapshot, *, heating_permitted,
+                power_ready) -> StartupDecision:
         """power_ready means conflicting loads have already been switched off.
 
         The central controller must establish this permission before enabling
         the 3 kW heater. This module cannot verify physical relay operation.
         """
-        mode = signals.get("mode", {})
-        automatic = (
-            mode.get("valid") is True and mode.get("value") == "AUTO"
-        )
+        automatic = signals.mode.valid and signals.mode.value == Mode.AUTO
 
         # Faults remain latched across mode changes.
         if not automatic:
             if self.fault is None:
-                self.stage = "IDLE"
+                self.stage = StartupStage.IDLE
             return self._result(False, False, "Automatic startup inactive")
 
         if self.fault is not None:
             return self._result(False, False, self.fault)
 
-        sampled_at = signals.get("sampled_at")
-        fresh = (
-            isinstance(sampled_at, (int, float))
-            and not isinstance(sampled_at, bool)
-            and 0 <= time.monotonic() - sampled_at <= 0.5
-        )
-
-        reading = signals.get("temperatures", {}).get(self.sensor, {})
-        temperature = reading.get("celsius")
+        reading = signals.temperatures.get(self.sensor)
+        temperature = reading.celsius if reading is not None else None
         valid_temperature = (
-            reading.get("valid") is True
+            reading is not None
+            and reading.valid is True
             and isinstance(temperature, (int, float))
             and not isinstance(temperature, bool)
             and math.isfinite(temperature)
         )
 
-        if (
-            not fresh
-            or signals.get("sampling_interrupted", False)
-            or not valid_temperature
-        ):
-            self.stage = "FAULT"
+        if not signals.available or not valid_temperature:
+            self.stage = StartupStage.FAULT
             self.fault = "Startup temperature or sampling unavailable"
             return self._result(False, False, self.fault)
 
-        if self.stage == "IDLE":
+        if self.stage == StartupStage.IDLE:
             self.stage = (
-                "PREHEAT_3KW"
+                StartupStage.PREHEAT_3KW
                 if temperature < self.cold_threshold
-                else "SECOND_STAGE"
+                else StartupStage.SECOND_STAGE
             )
 
         if (
-            self.stage == "PREHEAT_3KW"
+            self.stage == StartupStage.PREHEAT_3KW
             and temperature >= self.complete_threshold
         ):
-            self.stage = "SECOND_STAGE"
+            self.stage = StartupStage.SECOND_STAGE
 
         # Stage 2 never automatically falls back to 3 kW heating.
         # Its operating temperatures and PT3 faults belong to later modules.
         if heating_permitted is not True:
-            return self._result(False, False, "Heating permission withheld")
+            return self._result(False, False, "Heating permission withheld",
+                                inhibited_by=("HEATING_NOT_PERMITTED",))
 
-        if self.stage == "PREHEAT_3KW":
+        if self.stage == StartupStage.PREHEAT_3KW:
             if power_ready is not True:
                 return self._result(
-                    False, False, "Waiting for conflicting loads to switch off"
+                    False, False, "Waiting for conflicting loads to switch off",
+                    inhibited_by=("CONFLICTING_LOADS_ACTIVE",),
                 )
             return self._result(True, False, "Cold-water 3 kW preheating")
 
@@ -117,19 +108,18 @@ class StartupController:
             False, True, "Second-stage heating may take control"
         )
 
-    def _result(self, heater_on, second_stage, reason):
-        preheating = self.stage == "PREHEAT_3KW"
-        return {
-            "stage": self.stage,
-            "fault": self.fault,
-            "reason": reason,
-            "heater_3kw": {
-                "output": self.heater_output,
-                "on": heater_on,
-            },
-            "block_transfer_pumps": preheating,
-            "block_heater_1kw": preheating,
-            "block_heating_circulation": preheating,
-            "second_stage_permitted": second_stage,
-            "pasteurization_permitted": False,
-        }
+    def _result(self, heater_on, second_stage, reason, inhibited_by=()):
+        preheating = self.stage == StartupStage.PREHEAT_3KW
+        if self.fault is not None and not inhibited_by:
+            inhibited_by = ("STARTUP_FAULT",)
+        return StartupDecision(
+            stage=self.stage,
+            fault=self.fault,
+            reason=reason,
+            heater_3kw=EquipmentRequest(heater_on, reason, tuple(inhibited_by)),
+            block_transfer_pumps=preheating,
+            block_heater_1kw=preheating,
+            block_heating_circulation=preheating,
+            second_stage_permitted=second_stage,
+            pasteurization_permitted=False,
+        )

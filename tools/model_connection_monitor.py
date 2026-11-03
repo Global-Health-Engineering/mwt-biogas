@@ -1,6 +1,5 @@
 """Desk integration: live acquisition plus a synthetic model worker."""
 
-"""from concurrent.futures import ProcessPoolExecutor"""
 from datetime import datetime, timezone
 import json
 import multiprocessing
@@ -263,7 +262,7 @@ def main():
                 signals = processor.process(snapshot)
                 sampled_at = snapshot["sampled_at"]
 
-                if signals["sampling_interrupted"]:
+                if not signals.available:
                     interruptions += 1
                     raise RuntimeError(
                         "Acquisition interrupted; connection test stopped"
@@ -321,7 +320,7 @@ def main():
                             timezone.utc
                         ).isoformat(),
                         "snapshot": snapshot,
-                        "signals": signals,
+                        "signals": signals.to_dict(),
                         "model": {
                             "input_source": "SYNTHETIC",
                             "available": available,
@@ -394,4 +393,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main()

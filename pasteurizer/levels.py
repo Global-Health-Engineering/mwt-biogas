@@ -32,7 +32,7 @@ class LevelProcessor:
         self._accepted = None
 
     def update(self, raw: bool, now: float) -> LevelReading:
-        """Call regularly using time.monotonic() for now."""
+        """Call every cycle; now comes from the controller's clock."""
         raw = bool(raw)
         candidate = raw if self.active_high else not raw
 
@@ -47,4 +47,4 @@ class LevelProcessor:
             raw=raw,
             reached=self._accepted,
             pending=self._accepted != candidate,
-        )
+        )

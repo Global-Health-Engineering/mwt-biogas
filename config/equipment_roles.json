@@ -1,5 +1,22 @@
 {
   "physical_assignments_verified": false,
+  "command_outputs": {
+    "heater_3kw": "heater_3kw_E2_K1",
+    "heater_1kw": "heater_1kw_E1_K2",
+    "heating_circulation": "pump_40w_2_M3_2_K3_2",
+    "transfer_pump_1": "pump_120w_1_M2_1_K6_1",
+    "transfer_pump_2": "pump_120w_2_M2_2_K6_2",
+    "manhole_drain": "pump_40w_1_M3_1_K3_1",
+    "overflow_valve_1_open": "ball_valve_1_Y1",
+    "overflow_valve_2_open": "ball_valve_2_Y2",
+    "pasteurizer_isolation_open": "ball_valve_3_Y3",
+    "control_valve_percent": "control_valve_Y4",
+    "biogas_compressor": "compressor_M3_3_K3_3",
+    "cabinet_fan_disabled": "fan_M1_K4",
+    "light_green": "led_green_P1",
+    "light_yellow": "led_yellow_P2",
+    "light_red": "led_red_P3"
+  },
   "levels": {
     "manhole_water_present": "level_switch_1",
     "line_1_tank_low": "level_switch_2",
