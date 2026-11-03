@@ -7,7 +7,7 @@ const KINDS = ["STATE_TRANSITION", "MODE_CHANGE", "ALARM_RAISED", "ALARM_CLEARED
   "ALARM_ACKNOWLEDGED", "OPERATOR_ACTION", "OUTPUT_REQUESTED", "OUTPUT_WRITTEN", "OUTPUT_WRITE_FAILED",
   "OUTPUT_WRITE_RECOVERED", "MODEL_STATUS", "LOG_GAP", "CLOCK_CORRECTION", "CLOCK_SYNC_CHANGED",
   "CONTROLLER_START", "CONTROLLER_STOP", "CONFIG_CHANGED", "PREVIOUS_RUN_UNCLEAN",
-  "HISTORIAN_DB_RECOVERED", "HISTORIAN_STORAGE", "MANUAL_EXPIRED", "INDICATORS"];
+  "HISTORIAN_DB_RECOVERED", "HISTORIAN_STORAGE", "MANUAL_EXPIRED", "INDICATORS", "OUTPUT_NOT_WRITTEN"];
 const $ = (s) => document.querySelector(s);
 
 function filterQuery() {
@@ -22,7 +22,7 @@ function filterQuery() {
 }
 
 function rowHtml(r) {
-  return `<tr class="${r.severity === "CRITICAL" ? "row-critical" : r.severity === "WARNING" ? "row-warning" : ""}">
+  return `<tr class="${r.severity === "CRITICAL" ? "row-critical" : r.severity === "WARNING" ? "row-warning" : r.kind === "OUTPUT_NOT_WRITTEN" ? "row-notwritten" : ""}">
     <td class="nowrap">${UI.time(r.utc)}</td>
     <td><span class="src">${UI.esc(r.source)}</span><br><span class="muted small">${UI.esc(UI.clockQuality(r.clock_source, r.clock_sync))}</span></td>
     <td>${UI.severity(r.severity)}</td>
@@ -78,8 +78,9 @@ async function header() {
   try {
     const v = await UI.get("/api/live");
     const src = v.status ? v.status.data_source : "UNKNOWN";
-    $("#source").textContent = src === "SIMULATED" ? "SIMULATION" : src === "LIVE" ? "LIVE" : "SOURCE UNKNOWN";
-    $("#source").className = "badge " + (src === "SIMULATED" ? "badge-sim" : src === "LIVE" ? "badge-live" : "badge-unknown");
+    const shadow = v.status && v.status.outputs_enabled === false;
+    $("#source").textContent = shadow ? "LIVE INPUTS — OUTPUTS DISABLED / SHADOW RUN" : src === "SIMULATED" ? "SIMULATION" : src === "LIVE" ? "LIVE" : "SOURCE UNKNOWN";
+    $("#source").className = "badge " + (shadow ? "badge-shadow" : src === "SIMULATED" ? "badge-sim" : src === "LIVE" ? "badge-live" : "badge-unknown");
     $("#conn").textContent = v.state === "CONNECTED" ? "Controller connected" : `Controller ${v.state.toLowerCase()}`;
     $("#conn").className = "conn conn-" + v.state.toLowerCase();
   } catch (error) {

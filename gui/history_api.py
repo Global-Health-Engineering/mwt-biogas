@@ -42,8 +42,9 @@ def describe(kind, data) -> tuple[str, str, list, str | None]:
         verdict = "accepted" if data.get("accepted") else "refused"
         text = (f"{data.get('action')} by {data.get('user')} ({data.get('role')}): "
                 f"{verdict}, {data.get('outcome')}")
-    elif kind in ("OUTPUT_WRITTEN", "OUTPUT_REQUESTED"):
-        prefix = "Written" if kind == "OUTPUT_WRITTEN" else "Requested"
+    elif kind in ("OUTPUT_WRITTEN", "OUTPUT_REQUESTED", "OUTPUT_NOT_WRITTEN"):
+        prefix = {"OUTPUT_WRITTEN": "Written", "OUTPUT_REQUESTED": "Requested",
+                  "OUTPUT_NOT_WRITTEN": "NOT WRITTEN (outputs disabled, shadow run); command"}[kind]
         cause = " (shutdown)" if data.get("cause") == "SHUTDOWN" else ""
         text = f"{prefix}{cause}: {_changes(data) or 'no change'}"
         return "INFO", text, list((data.get("changes") or {}).keys()), None
@@ -56,6 +57,9 @@ def describe(kind, data) -> tuple[str, str, list, str | None]:
         text = f"Model {data.get('status')}, usable {data.get('usable')}: {data.get('reason')}"
     elif kind == "CONTROLLER_START":
         text = f"Controller started ({data.get('data_source', '?')} data)"
+        if data.get("outputs_enabled") is False:
+            text = (f"Controller started: {data.get('data_source', '?')} inputs, outputs DISABLED "
+                    "(shadow run, nothing is written)")
     elif kind == "INDICATORS":
         lights = [name for name, on in (("warning", data.get("warning")), ("trip", data.get("trip")),
                                         ("release permitted", data.get("release_permitted")),
@@ -63,6 +67,8 @@ def describe(kind, data) -> tuple[str, str, list, str | None]:
         text = f"Indicator lights for {data.get('process_state')}: {', '.join(lights) or 'none active'}"
     elif kind == "CONTROLLER_STOP":
         text = f"Controller stopped: {data.get('reason')}"
+        if data.get("outputs_enabled") is False:
+            text += "; safe frame NOT written (outputs disabled)"
     else:
         text = f"{kind}: {json.dumps(data, separators=(',', ':'))[:200]}"
     return "INFO", text, [], None

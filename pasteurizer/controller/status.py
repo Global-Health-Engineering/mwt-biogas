@@ -47,8 +47,8 @@ class ControllerStatus:
     stop_hold: bool
     release_permitted: bool
     requested: dict
-    written: dict | None          # None: this cycle's frame was NOT confirmed written
-    write_ok: bool
+    written: dict | None          # None: this cycle's frame was NOT physically written
+    write_ok: bool                # True only for a confirmed physical write
     state_saved: bool             # persistent state confirmed stored
     arbitration_notes: list
     alarms: list
@@ -74,6 +74,10 @@ class ControllerStatus:
     commanded: dict = field(default_factory=dict)   # arbitrated frame, written or not
     lamp_modes: dict = field(default_factory=dict)  # green/yellow/red: off/steady/blinking
     model: dict = field(default_factory=dict)       # summary for the model block
+    # False in a shadow run (live inputs, outputs disabled): nothing is ever
+    # written, `written` stays None and output_write says why.
+    outputs_enabled: bool = True
+    output_write: str = ""      # WRITTEN / WRITE_FAILED / NOT_WRITTEN_OUTPUTS_DISABLED
 
 
 def _iso(epoch) -> str:
@@ -116,8 +120,14 @@ def model_summary(inputs, enabled: bool) -> dict:
 
 def build_status(*, cycle, inputs, process, requests, result, write_ok,
                  keeper, faults, manual, historian=None, identity=None,
-                 lamp_modes=None, model_enabled=False) -> ControllerStatus:
+                 lamp_modes=None, model_enabled=False,
+                 outputs_enabled=True) -> ControllerStatus:
+    """write_ok: the output layer accepted the frame. It counts as written only
+    when outputs are enabled; a shadow writer's acceptance is never a write."""
     frame = result.commands
+    physical = bool(write_ok and outputs_enabled)
+    output_write = ("WRITTEN" if physical
+                    else "NOT_WRITTEN_OUTPUTS_DISABLED" if write_ok else "WRITE_FAILED")
     now = inputs.now
     identity = identity or {}
     wall = identity.get("wall")
@@ -131,8 +141,8 @@ def build_status(*, cycle, inputs, process, requests, result, write_ok,
         stop_hold=process.stop_hold,
         release_permitted=requests.release_permitted,
         requested=asdict(requests.commands),
-        written=asdict(frame) if write_ok else None,
-        write_ok=write_ok,
+        written=asdict(frame) if physical else None,
+        write_ok=physical,
         state_saved=keeper.saved,
         arbitration_notes=[asdict(note) for note in result.notes],
         alarms=alarm_views(faults, now=now, wall=wall),
@@ -158,4 +168,6 @@ def build_status(*, cycle, inputs, process, requests, result, write_ok,
         commanded=asdict(frame),
         lamp_modes=lamp_modes or {},
         model=model_summary(inputs, model_enabled),
+        outputs_enabled=outputs_enabled,
+        output_write=output_write,
     )

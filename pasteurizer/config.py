@@ -515,6 +515,17 @@ def _check_cross_references(config_parts):
                 "in level_settings.json"
             )
 
+    # Only level switches with a role are read and supervised. An unused input
+    # (level_switch_10) must be disabled, so it never becomes a signal or alarm.
+    assigned = set(level_roles.values())
+    unused = sorted(name for name, options in levels.items()
+                    if options.enabled and name not in assigned)
+    if unused:
+        raise ConfigError(
+            f"level_settings.json: {unused} enabled but without a role in "
+            "equipment_roles.json levels; set \"enabled\": false"
+        )
+
     expected = {field.name for field in fields(OutputCommands)}
     if set(command_outputs) != expected:
         missing = sorted(expected - set(command_outputs))

@@ -26,7 +26,7 @@ Shared: `config.py` and `control_settings.py` (load and validate all
 level overrides), `persistence.py` (latched faults, STOP hold, retry
 allowance), `event_log.py` (UTC + clock-sync + monotonic + boot ID +
 sequence; queues records for the historian), `clock_sync.py` (kernel NTP
-state), `historian/` (see below), `alarm_catalogue.py` (equipment and consequence per alarm, for the GUI), `publisher.py` (read-only status publisher on localhost, see "Read-only GUI"), `watchdog.py` (heartbeat; simulation stand-in), `simulated_io.py` (plant
+state), `historian/` (see below), `alarm_catalogue.py` (equipment and consequence per alarm, for the GUI), `publisher.py` (read-only status publisher on localhost, see "Read-only GUI"), `watchdog.py` (heartbeat; simulation stand-in), `shadow_outputs.py` (output writer for shadow runs: keeps commands, writes nothing), `simulated_io.py` (plant
 simulator with PRETEND parameters).
 
 `controller/` holds one responsibility per module:
@@ -172,10 +172,69 @@ marked SIMULATED.
 | `tags.py` | Drawing tags, names, kinds (what the GUI may claim), pipe legend |
 | `static/` | Pages and scripts: drawings, alarms, trends, log window |
 
+## Shadow run (RevPi: live inputs, outputs disabled)
+
+The controller runs on the real inputs, in the mode set by the selector S1,
+with its normal logic, supervision and interlocks. Every command goes to
+`ShadowOutputWriter` (`pasteurizer/shadow_outputs.py`), which only keeps it in
+memory: nothing is written to a RevPi output. The inputs are read by
+`HardwareReader` with revpimodio2 in monitoring mode, which cannot write
+outputs either.
+
+    python3 tools/run_shadow.py                                  # terminal 1
+    python3 tools/run_gui.py --database logs/shadow.sqlite       # terminal 2
+    ssh -L 8080:127.0.0.1:8080 pi@<revpi-address>                # on the PC, then
+                                                                 # open http://127.0.0.1:8080/
+
+- The GUI shows "LIVE INPUTS — OUTPUTS DISABLED / SHADOW RUN" and hollow
+  lamps (command only). Every output reads "not written — outputs disabled";
+  requested and commanded values are shown separately. The log records
+  OUTPUT_NOT_WRITTEN (reason OUTPUTS_DISABLED) instead of OUTPUT_WRITTEN, and
+  the stop reports "safe frame NOT written".
+- Nothing moves, so checks that wait for an actuator raise their faults
+  (transfer no-flow, preheat timeout, Y4 position timeout). Flow calibration
+  is pending: the GUI shows pulse counts and pulse rate, L/min is
+  unavailable, and the flow checks block transfer and treatment in AUTO.
+- `level_switch_10` (I_10_i06) is unused: disabled in `level_settings.json`,
+  not read, no signal, no alarm, not in the GUI. An enabled level switch
+  without a role in `equipment_roles.json` is refused at startup.
+- Own files: `logs/shadow.sqlite` (history), `logs/shadow_state.json`
+  (latched faults, STOP hold), `logs/shadow.lock` (held while running; a
+  second shadow runner is refused). The runner refuses the simulation and
+  live file names.
+
+Reset (clears latched faults and STOP hold of the shadow run only):
+
+1. Stop the runner with Ctrl+C and wait for "Shadow run stopped".
+2. Check that it is gone: `pgrep -af run_shadow.py` prints nothing.
+3. `rm logs/shadow_state.json`
+4. Start the runner again.
+
+Never delete the state file while the runner is running: it rewrites the
+state on every change and at shutdown. Keep `logs/shadow.sqlite`.
+
+Scripts in this repository that write outputs (none is used by the shadow
+run; do not run them during it): `tools/output_mapping_test.py` (pulses
+O_1..O_14 with `piTest -w`), `tools/led_test.py` (O_3, O_4, O_5),
+`tools/valve_position_test.py` (writes the Y4 analogue command). Every other
+script reads only (monitoring mode) or has no hardware access.
+
+What is running on the RevPi (read-only checks, nothing is changed):
+
+    ps -eo pid,user,etime,cmd | grep -Ei "python|revpi|node-?red|codesys|logi|pitest" | grep -v grep
+    sudo fuser -v /dev/piControl0          # every process that has the process image open
+    systemctl list-units --type=service --state=running --no-pager
+    systemctl list-unit-files --state=enabled --no-pager
+    systemctl status revpipyload --no-pager       # RevPiPyLoad (may not be installed)
+    systemctl status nodered --no-pager           # Node-RED (may not be installed)
+    crontab -l; sudo crontab -l; ls -l /etc/cron.d
+    piTest -r O_1                                 # read one output's current value
+
 ## Desk checks (no hardware)
 
-    python3 tools/control_scenarios.py      # 81 controller scenarios (tools/scenarios/)
+    python3 tools/control_scenarios.py      # 87 controller scenarios (tools/scenarios/)
     python3 tools/control_scenarios.py 74 75 76 77 78 79 80 81   # GUI, publisher, simulation runner, port binding
+    python3 tools/control_scenarios.py 82 83 84 85 86 87         # shadow run, unused input, live timing
     python3 tools/control_scenarios.py 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68   # historian only
     python3 tools/simulate_plant.py         # timeline of a simulated cold start
     python3 tools/simulate_plant.py --minutes 20 --historian logs/simulation.sqlite

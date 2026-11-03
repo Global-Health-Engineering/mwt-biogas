@@ -135,7 +135,7 @@ const VIEWS = (() => {
       ${pump("transfer_pump_1", 920, 325, "EDB-PU-01", "Transfer pump 1", [868, 262, 128, 100])}
       ${pump("transfer_pump_2", 920, 449, "EDB-PU-02", "Transfer pump 2", [868, 386, 128, 100])}
       ${flowMeter("flow_sensor_1", 1030, 181, "EDB-FR-01", "Transfer flow, line 1", 1075, "left")}
-      ${flowMeter("flow_sensor_2", 1150, 294, "EDB-FR-02", "Transfer flow, line 2", 1108, "right")}
+      ${flowMeter("flow_sensor_2", 1144, 294, "EDB-FR-02", "Transfer flow, line 2", 1108, "right")}
       ${filter(612, 690, "EDB-FT-05", false, 726)}
       ${levelSwitch("level_switch_1", 560, 610, "LS", "EDB-LS-01", "Manhole water present", 560)}
       ${pump("manhole_drain", 700, 690, "EDB-PU-03", "Manhole drain pump", [656, 626, 120, 112], true)}

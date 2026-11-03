@@ -209,7 +209,7 @@ def s76():
         assert rig.gui.host == "127.0.0.1"
         # The browser pages send no commands: no fetch with a method other than GET.
         for name in ("app.js", "log.js", "trends.js", "common.js"):
-            text = (ROOT / "gui" / "static" / name).read_text()
+            text = (ROOT / "gui" / "static" / name).read_text(encoding="utf-8")
             assert "method:" not in text and "POST" not in text, name
     finally:
         rig.close()

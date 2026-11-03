@@ -3,6 +3,8 @@
 Events (on change only):
   OUTPUT_REQUESTED   requested commands changed, with the arbiter's notes
   OUTPUT_WRITTEN     a successfully written command changed
+  OUTPUT_NOT_WRITTEN outputs disabled (shadow run): the command changed but
+                     was not written, reason OUTPUTS_DISABLED
   OUTPUT_WRITE_FAILED / OUTPUT_WRITE_RECOVERED
                      (at shutdown the same kinds, with cause SHUTDOWN and the full frame)
   INDICATORS         light modes (blinking lights are not logged per toggle)
@@ -15,12 +17,15 @@ result, plant state, requested and written commands, lights and alarms.
 
 from dataclasses import asdict
 
+from pasteurizer.shadow_outputs import NOT_WRITTEN_REASON
+
 LIGHTS = ("light_green", "light_yellow", "light_red")
 
 
 class CycleRecorder:
-    def __init__(self, log, faults, logging_settings, *, start_time):
+    def __init__(self, log, faults, logging_settings, *, start_time, outputs_enabled=True):
         self.log = log
+        self.outputs_enabled = outputs_enabled
         self.faults = faults
         self.interval = logging_settings.periodic_interval_s
         self._last_written = None
@@ -73,8 +78,12 @@ class CycleRecorder:
         if ok:
             changes = {k: v for k, v in full.items() if self._last_written is None
                        or getattr(self._last_written, k) != v}
-            self.log.record("OUTPUT_WRITTEN", cause="SHUTDOWN", frame=full,
-                            changes=changes, plant_safe=True)
+            if self.outputs_enabled:
+                self.log.record("OUTPUT_WRITTEN", cause="SHUTDOWN", frame=full,
+                                changes=changes, plant_safe=True)
+            else:
+                self.log.record("OUTPUT_NOT_WRITTEN", cause="SHUTDOWN", frame=full,
+                                changes=changes, plant_safe=True, reason=NOT_WRITTEN_REASON)
             self._last_written = frame
         else:
             self.log.record("OUTPUT_WRITE_FAILED", cause="SHUTDOWN", requested=full,
@@ -87,8 +96,12 @@ class CycleRecorder:
                        self._last_written is None
                        or getattr(self._last_written, k) != v)}
         if changes:
-            self.log.record("OUTPUT_WRITTEN", changes=changes, plant_safe=plant_safe)
-        self._last_written = frame
+            if self.outputs_enabled:
+                self.log.record("OUTPUT_WRITTEN", changes=changes, plant_safe=plant_safe)
+            else:
+                self.log.record("OUTPUT_NOT_WRITTEN", changes=changes, plant_safe=plant_safe,
+                                reason=NOT_WRITTEN_REASON)
+        self._last_written = frame      # last frame handed over (written or not)
 
     def _indicators(self, indicators):
         if indicators == self._last_indicators:
@@ -158,6 +171,8 @@ def process_sample(inputs, status) -> dict:
         "requested": status.requested,
         "written": status.written,          # None: frame not confirmed written
         "write_ok": status.write_ok,
+        "outputs_enabled": status.outputs_enabled,
+        "output_write": status.output_write,
         "release_permitted": status.release_permitted,
         "lights": status.lights,
         "alarms": [a.code for a in status.alarms if a.active],

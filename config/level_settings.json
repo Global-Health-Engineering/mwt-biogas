@@ -47,6 +47,6 @@
   "level_switch_10": {
     "active_high": true,
     "debounce_seconds": 0.2,
-    "enabled": true
+    "enabled": false
   }
 }

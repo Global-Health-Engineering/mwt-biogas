@@ -107,7 +107,12 @@ class InputStage:
     # ------------------------------------------------------------------
     def _acquire(self, now):
         try:
-            signals = self.signal_processor.process(self.reader.read(), now)
+            snapshot = self.reader.read()
+            # Freshness is judged after the read, on the processor's clock: a
+            # real reader stamps its snapshot after the cycle started, so the
+            # cycle's own `now` would give a negative age and reject every
+            # live snapshot. (Simulated clocks do not move within a cycle.)
+            signals = self.signal_processor.process(snapshot)
         except Exception as error:
             signals = self.signal_processor.unavailable(now, f"Read failed: {error}")
         if signals.acquisition.valid:

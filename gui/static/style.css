@@ -20,6 +20,16 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px
 .badge { font-weight: 700; letter-spacing: .06em; padding: 5px 12px; border-radius: 6px; font-size: 15px; }
 .badge-sim { background: var(--sim); color: #1b1300; }
 .badge-live { background: #1f6f43; color: #fff; }
+.badge-shadow { background: repeating-linear-gradient(135deg, #7a1fa2 0 10px, #5b1677 10px 20px); color: #fff; }
+.shadow-banner { margin: 8px 14px 0; padding: 8px 12px; border: 2px solid #b04fd6; border-radius: 6px; background: rgba(176, 79, 214, .12); }
+.plant-lamp.cmd-only { background: transparent !important; border: 2px dashed #9aa7b4; }
+.plant-lamp.cmd-only.lamp-green:not(.mode-off) { border-color: #2ecc71; }
+.plant-lamp.cmd-only.lamp-yellow:not(.mode-off) { border-color: #f1c40f; }
+.plant-lamp.cmd-only.lamp-red:not(.mode-off) { border-color: #e74c3c; }
+.lamp.cmd-on { fill: none; stroke: var(--on); stroke-width: 3; stroke-dasharray: 4 2; }
+.lamp.cmd-off { fill: none; stroke: #4c7a61; stroke-width: 2; stroke-dasharray: 4 2; }
+.value.uncal { fill: var(--warn); font-size: 12px; }
+.row-notwritten { box-shadow: inset 4px 0 0 #b04fd6; }
 .badge-unknown { background: var(--unknown); color: #fff; }
 .conn { padding: 4px 10px; border-radius: 6px; border: 1px solid var(--line); }
 .conn-connected { color: var(--on); }

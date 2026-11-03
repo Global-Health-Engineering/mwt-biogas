@@ -46,11 +46,20 @@ def _data_source(reader) -> str:
     return source
 
 
+def _outputs_enabled(writer) -> bool:
+    """A writer without outputs (shadow run) says so; physical writers need not."""
+    enabled = getattr(writer, "outputs_enabled", True)
+    if not isinstance(enabled, bool):
+        raise ValueError("The output writer's outputs_enabled must be True or False")
+    return enabled
+
+
 @dataclass(frozen=True)
 class ShutdownResult:
-    safe_frame_written: bool
+    safe_frame_written: bool        # physically written; never True with outputs disabled
     state_saved: bool
     records_not_stored: int
+    outputs_enabled: bool = True
 
 
 class PlantController:
@@ -62,6 +71,9 @@ class PlantController:
         self.clock = clock if clock is not None else MonotonicClock()
         self.log = event_log if event_log is not None else EventLog(clock=self.clock)
         self.writer = writer
+        # False in a shadow run: frames are accepted for supervision and the
+        # record, but never reported as physically written.
+        self.outputs_enabled = _outputs_enabled(writer)
         self.log.data_source = _data_source(reader)
         self.heartbeat = heartbeat
         self.battery_percent = battery_percent
@@ -84,7 +96,7 @@ class PlantController:
         self.requests = OutputRequestBuilder(config)
         self.arbiter = OutputArbiter(config, start_time=now)
         self.recorder = CycleRecorder(self.log, self.faults, control.logging,
-                                      start_time=now)
+                                      start_time=now, outputs_enabled=self.outputs_enabled)
         self.keeper = StateKeeper(store, self.log)
         self.commands = OperatorCommands(
             process=self.process, treatment=self.treatment, faults=self.faults,
@@ -116,6 +128,7 @@ class PlantController:
                         retry_exhausted=saved.low_flow_retry_exhausted,
                         watchdog_restart=saved.watchdog_tripped,
                         simulated_io=simulated_io,
+                        outputs_enabled=self.outputs_enabled,
                         model_control_enabled=self.cfg.control.model_control_enabled)
         return saved.watchdog_tripped
 
@@ -140,21 +153,24 @@ class PlantController:
         """Orderly stop, in this order so nothing can delay the safe outputs:
 
         1. write the plant safe command frame (immediately, no storage involved),
-           queued as OUTPUT_REQUESTED / OUTPUT_WRITTEN (or _FAILED), cause SHUTDOWN
+           queued as OUTPUT_REQUESTED / OUTPUT_WRITTEN (or _FAILED), cause SHUTDOWN;
+           with outputs disabled (shadow run) OUTPUT_NOT_WRITTEN, never "written"
         2. save the controller state (latched faults, STOP hold)
         3. record CONTROLLER_STOP and flush the historian, bounded by timeout_s
         """
         now = self.clock.monotonic()
         frame = self.arbiter.safe_frame()
-        written = self._write(frame, now, heartbeat=False)
-        self.recorder.shutdown_frame(frame, written)
+        accepted = self._write(frame, now, heartbeat=False)
+        written = accepted and self.outputs_enabled
+        self.recorder.shutdown_frame(frame, accepted)
         self._persist()
         self.log.record("CONTROLLER_STOP", reason=reason, cycles=self.cycle_count,
                         state=self.process.state.value, safe_frame_written=written,
+                        outputs_enabled=self.outputs_enabled,
                         state_saved=self.keeper.saved)
         lost = self.log.close(timeout_s)
         return ShutdownResult(safe_frame_written=written, state_saved=self.keeper.saved,
-                              records_not_stored=lost)
+                              records_not_stored=lost, outputs_enabled=self.outputs_enabled)
 
     def persistent_state(self) -> PersistentState:
         return PersistentState(
@@ -219,7 +235,8 @@ class PlantController:
             historian=self.log.historian.status(), identity=self._identity(),
             lamp_modes=self.arbiter.indicator_modes(
                 indicators, plant_safe=flags.summary.plant_trip),
-            model_enabled=self.cfg.control.model_control_enabled)
+            model_enabled=self.cfg.control.model_control_enabled,
+            outputs_enabled=self.outputs_enabled)
         self.recorder.requested(self.status)
         self.recorder.model(inputs)
         self.recorder.periodic(inputs, self.status)

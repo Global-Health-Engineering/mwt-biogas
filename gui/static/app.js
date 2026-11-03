@@ -9,6 +9,23 @@ const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 function isLive() { return APP.view && APP.view.state === "CONNECTED"; }
 
+// Shadow run: live inputs, commands computed but never written to an output.
+const SHADOW_TEXT = "LIVE INPUTS — OUTPUTS DISABLED / SHADOW RUN";
+const NOT_WRITTEN = "not written — outputs disabled";
+function isShadow(st) { return !!st && st.outputs_enabled === false; }
+function writtenText(st, format) {
+  if (isShadow(st)) return NOT_WRITTEN;
+  return st.write_ok ? format(st.written) : "not confirmed (write failed)";
+}
+// Uncalibrated flow: the pulse input can be valid while L/min is unavailable.
+function flowText(f) {
+  if (!f || !f.valid) return { value: "Unavailable", pulses: null, lpm: false };
+  const hz = f.pulse_rate_hz == null ? "—" : f.pulse_rate_hz.toFixed(2);
+  const pulses = `${f.raw_counter} pulses · ${hz} pulses/s`;
+  if (f.flow_lpm == null) return { value: "L/min unavailable", pulses, hz, lpm: false };
+  return { value: `${f.flow_lpm.toFixed(2)} L/min`, pulses, hz, lpm: true };
+}
+
 function word(id, on) {
   if (on === undefined || on === null) return "—";
   if (id.endsWith("_open")) return on ? "OPEN" : "CLOSED";
@@ -21,8 +38,10 @@ function renderHeader() {
   const v = APP.view, st = v && v.status;
   const src = st ? st.data_source : "UNKNOWN";
   const badge = $("#source");
-  badge.textContent = src === "SIMULATED" ? "SIMULATION" : src === "LIVE" ? "LIVE" : "SOURCE UNKNOWN";
-  badge.className = "badge " + (src === "SIMULATED" ? "badge-sim" : src === "LIVE" ? "badge-live" : "badge-unknown");
+  const shadow = isShadow(st);
+  badge.textContent = shadow ? SHADOW_TEXT : src === "SIMULATED" ? "SIMULATION" : src === "LIVE" ? "LIVE" : "SOURCE UNKNOWN";
+  badge.className = "badge " + (shadow ? "badge-shadow" : src === "SIMULATED" ? "badge-sim" : src === "LIVE" ? "badge-live" : "badge-unknown");
+  $("#shadow-banner").hidden = !shadow;
 
   const conn = $("#conn");
   const age = v && v.age_s != null ? `${v.age_s.toFixed(1)} s` : "—";
@@ -47,10 +66,11 @@ function renderHeader() {
   for (const [colour, text] of [["green", "Pasteurizing"], ["yellow", "Warning"], ["red", "Fault"]]) {
     const el = $(`#lamp-${colour}`);
     const mode = isLive() && modes ? modes[colour] : "unknown";
-    el.className = `plant-lamp lamp-${colour} mode-${mode}`;
+    el.className = `plant-lamp lamp-${colour} mode-${mode}${shadow ? " cmd-only" : ""}`;
     let label = text + (mode === "blinking" ? " (blinking)" : mode === "off" ? " off" : "");
     if (colour === "red" && mode === "blinking") label = "Fallback path (red blinking)";
     if (mode === "unknown") label = `${text}: unknown`;
+    if (shadow && mode !== "unknown") label += " — command, not written";
     el.title = label;
     $(`#lamp-${colour}-text`).textContent = label;
   }
@@ -80,12 +100,12 @@ function renderEquipment() {
     if (e.kind === "command") {
       const cmd = st.commanded ? st.commanded[id] : undefined;
       const req = st.requested ? st.requested[id] : undefined;
-      for (const lamp of $$(`[data-lamp="${id}"]`)) {
-        lamp.setAttribute("class", "lamp " + (!live || cmd === undefined ? "unknown" : cmd ? "on" : "off"));
-      }
+      // Shadow run: hollow lamp = command only, nothing was written.
+      const shown = !live || cmd === undefined ? "unknown" : isShadow(st) ? (cmd ? "cmd-on" : "cmd-off") : cmd ? "on" : "off";
+      for (const lamp of $$(`[data-lamp="${id}"]`)) lamp.setAttribute("class", "lamp " + shown);
       // No physical feedback: the GUI states the command, never the actual state.
       let text = live ? `Command ${word(id, cmd)}` : "Unknown (stale)";
-      if (live && !st.write_ok) text += " · not written";
+      if (live && !isShadow(st) && !st.write_ok) text += " · not written";
       setText(`[data-state="${id}"]`, text);
       // Requested differs from the command: an interlock or permission overrides it.
       setText(`[data-req="${id}"]`, live && req !== undefined && req !== cmd ? `requested ${word(id, req)}` : "");
@@ -107,13 +127,14 @@ function renderEquipment() {
     } else if (id.startsWith("flow_sensor_")) {
       const f = sig.flows && sig.flows[id];
       const age = f && f.sampled_at != null ? st.now - f.sampled_at : null;
-      const ok = f && f.valid && f.flow_lpm !== null;
-      let text = ok ? `${f.flow_lpm.toFixed(2)} L/min` : "Unavailable";
+      const ft = flowText(f);
       const notes = [];
-      if (ok && age !== null && age > FLOW_STALE_S) notes.push(`Stale ${age.toFixed(0)} s`);
-      if (f && f.calibrated === false) notes.push("Uncalibrated");
+      if (ft.lpm && age !== null && age > FLOW_STALE_S) notes.push(`Stale ${age.toFixed(0)} s`);
+      if (ft.pulses && !ft.lpm) notes.push(`${ft.hz} pulses/s`);   // counts in the detail panel
+      else if (f && f.calibrated === false) notes.push("Uncalibrated");
       if (!live) notes.push("stale");
-      setText(`[data-value="${id}"]`, text, ok && live ? "" : "bad");
+      // L/min unavailable is not a fault in the pulse input: amber, smaller text.
+      setText(`[data-value="${id}"]`, ft.value, !live ? "bad" : ft.lpm ? "" : ft.pulses ? "uncal" : "bad");
       setText(`[data-detail="${id}"]`, notes.join(" · "));
     }
   }
@@ -123,7 +144,7 @@ function renderEquipment() {
   const fb = sig.valve && sig.valve.feedback;
   const lastKnown = live ? "" : " (last known)";
   setText('[data-y4="req"]', `Requested ${y4req == null ? "—" : y4req.toFixed(1) + " %"}${lastKnown}`, live ? "" : "stale");
-  setText('[data-y4="wr"]', `Written ${y4wr == null ? "not confirmed" : y4wr.toFixed(1) + " %"}${lastKnown}`, live ? "" : "stale");
+  setText('[data-y4="wr"]', `${isShadow(st) ? "Not written — outputs disabled" : "Written " + (y4wr == null ? "not confirmed" : y4wr.toFixed(1) + " %")}${lastKnown}`, live ? "" : "stale");
   setText('[data-y4="fb"]', `Measured ${fb && fb.valid && fb.position_percent != null ? fb.position_percent.toFixed(1) + " %" : "Unavailable"}${lastKnown}`, live ? "" : "stale");
 }
 
@@ -187,16 +208,18 @@ function renderCard() {
       <div class="status-word ${live ? cls : "stale"}">${live ? text : "Unknown (stale data)"}</div>
       <p class="reason">${UI.esc(st.state_reason)}</p>
       ${timers.map((t) => `<p>${UI.esc(t)}</p>`).join("")}
+      ${isShadow(st) ? `<p class="note">Outputs disabled (shadow run): no command is written, no treatment takes place.</p>` : ""}
       <h3>Model</h3>${modelBlock(st)}
       <div class="flags">${provisional(["model", "flow_sensor_3", "PT3_B4"])}</div>`;
   } else {
     const sig = st.signals || {};
     const lv = (n) => { const s = sig.levels && sig.levels[`level_switch_${n}`]; return s && s.valid ? (s.reached ? "reached" : "—") : "?"; };
-    const flow = (n) => { const f = sig.flows && sig.flows[`flow_sensor_${n}`]; return f && f.valid && f.flow_lpm != null ? `${f.flow_lpm.toFixed(2)} L/min` : "Unavailable"; };
+    const flow = (n) => { const ft = flowText(sig.flows && sig.flows[`flow_sensor_${n}`]); return ft.pulses && !ft.lpm ? `${ft.value}<br><span class="muted small">${ft.pulses}</span>` : ft.value; };
     const cmd = (id) => {
       if (!live || !st.commanded) return "Unknown (stale)";
       const req = st.requested ? st.requested[id] : undefined;
-      return `Command ${word(id, st.commanded[id])}${req !== undefined && req !== st.commanded[id] ? ` (requested ${word(id, req)})` : ""}`;
+      return `Command ${word(id, st.commanded[id])}${req !== undefined && req !== st.commanded[id] ? ` (requested ${word(id, req)})` : ""}` +
+        (isShadow(st) ? `<br><span class="note small">${NOT_WRITTEN}</span>` : "");
     };
     card.innerHTML = `<h2>EDiBl</h2>
       <table class="kv">
@@ -214,7 +237,7 @@ function renderCard() {
         <tr><td>EDB-PU-03 drain pump</td><td>${cmd("manhole_drain")}</td></tr>
         <tr><td>EDB-LS-01 water present</td><td>${lv(1)}</td></tr>
       </table>
-      <p class="muted">Pump states are commands; a written ON does not prove a pump runs.</p>
+      <p class="muted">${isShadow(st) ? "Shadow run: commands are computed from live inputs and not written to any output." : "Pump states are commands; a written ON does not prove a pump runs."}</p>
       <div class="flags">${provisional(["flow_sensor_1", "flow_sensor_2"])}</div>`;
   }
 }
@@ -234,7 +257,7 @@ function renderDetail() {
     const v = (frame) => (frame ? (e.units === "%" ? `${Number(frame[e.id]).toFixed(1)} %` : word(e.id, frame[e.id])) : "not confirmed");
     rows.push(`<tr><th>Requested</th><td>${v(st.requested)}</td></tr>`,
       `<tr><th>Commanded</th><td>${v(st.commanded)}</td></tr>`,
-      `<tr><th>Written</th><td>${st.write_ok ? v(st.written) : "not confirmed (write failed)"}</td></tr>`);
+      `<tr><th>Written</th><td>${writtenText(st, v)}</td></tr>`);
     if (e.kind === "command+feedback") {
       const fb = st.signals.valve && st.signals.valve.feedback;
       rows.push(`<tr><th>Measured feedback</th><td>${fb && fb.valid ? fb.position_percent.toFixed(1) + " %" : "Unavailable"}</td></tr>`);
@@ -243,7 +266,13 @@ function renderDetail() {
   if (st && e.kind === "measured") {
     const s = st.signals;
     const r = (s.temperatures && s.temperatures[e.id]) || (s.flows && s.flows[e.id]) || (s.levels && s.levels[e.id]);
-    if (r) {
+    if (r && s.flows && s.flows[e.id]) {
+      const ft = flowText(r);
+      rows.push(`<tr><th>Pulse input</th><td>${r.valid ? "valid" : "invalid"}${r.error ? " · " + UI.esc(r.error) : ""}</td></tr>`,
+        `<tr><th>Pulse counter</th><td>${r.raw_counter ?? "—"}</td></tr>`,
+        `<tr><th>Pulse rate</th><td>${r.pulse_rate_hz == null ? "—" : r.pulse_rate_hz.toFixed(2) + " pulses/s"}</td></tr>`,
+        `<tr><th>Flow</th><td>${ft.lpm ? ft.value : r.valid ? "L/min unavailable — calibration pending (pulses per litre not set)" : "Unavailable"}</td></tr>`);
+    } else if (r) {
       const value = r.celsius ?? r.flow_lpm ?? (r.reached === true ? "Reached" : r.reached === false ? "Not reached" : null);
       rows.push(`<tr><th>Value</th><td>${r.valid && value != null ? (typeof value === "number" ? value.toFixed(2) + " " + (e.units || "") : value) : "Unavailable"}</td></tr>`,
         `<tr><th>Valid</th><td>${r.valid ? "yes" : "no"}${r.error ? " · " + UI.esc(r.error) : ""}</td></tr>`);
