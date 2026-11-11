@@ -7,7 +7,7 @@ const KINDS = ["STATE_TRANSITION", "MODE_CHANGE", "ALARM_RAISED", "ALARM_CLEARED
   "ALARM_ACKNOWLEDGED", "OPERATOR_ACTION", "OUTPUT_REQUESTED", "OUTPUT_WRITTEN", "OUTPUT_WRITE_FAILED",
   "OUTPUT_WRITE_RECOVERED", "MODEL_STATUS", "LOG_GAP", "CLOCK_CORRECTION", "CLOCK_SYNC_CHANGED",
   "CONTROLLER_START", "CONTROLLER_STOP", "CONFIG_CHANGED", "PREVIOUS_RUN_UNCLEAN",
-  "HISTORIAN_DB_RECOVERED", "HISTORIAN_STORAGE", "MANUAL_EXPIRED", "INDICATORS", "OUTPUT_NOT_WRITTEN"];
+  "HISTORIAN_DB_RECOVERED", "HISTORIAN_STORAGE", "MANUAL_EXPIRED", "INDICATORS", "OUTPUT_NOT_WRITTEN", "OUTPUT_GATE"];
 const $ = (s) => document.querySelector(s);
 
 function filterQuery() {
@@ -79,8 +79,8 @@ async function header() {
     const v = await UI.get("/api/live");
     const src = v.status ? v.status.data_source : "UNKNOWN";
     const shadow = v.status && v.status.outputs_enabled === false;
-    $("#source").textContent = shadow ? "LIVE INPUTS — OUTPUTS DISABLED / SHADOW RUN" : src === "SIMULATED" ? "SIMULATION" : src === "LIVE" ? "LIVE" : "SOURCE UNKNOWN";
-    $("#source").className = "badge " + (shadow ? "badge-shadow" : src === "SIMULATED" ? "badge-sim" : src === "LIVE" ? "badge-live" : "badge-unknown");
+    $("#source").textContent = shadow ? "LIVE INPUTS — OUTPUTS DISABLED / SHADOW RUN" : src === "SIMULATED" ? "SIMULATION" : src === "LIVE" ? "LIVE — OUTPUTS ENABLED" : "SOURCE UNKNOWN";
+    $("#source").className = "badge " + (shadow ? "badge-shadow" : src === "SIMULATED" ? "badge-sim" : src === "LIVE" ? "badge-outputs" : "badge-unknown");
     $("#conn").textContent = v.state === "CONNECTED" ? "Controller connected" : `Controller ${v.state.toLowerCase()}`;
     $("#conn").className = "conn conn-" + v.state.toLowerCase();
   } catch (error) {

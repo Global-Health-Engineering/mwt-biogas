@@ -1,0 +1,32 @@
+{
+  "description": "Settings for tools/flow_calibration.py only. Not loaded by the controller (pasteurizer/config.py FILES). Change pump_runtime_s if the bucket overfills.",
+  "sample_interval_s": 0.2,
+  "pre_start_count_s": 1.0,
+  "rundown_quiet_s": 5.0,
+  "max_rundown_wait_s": 120.0,
+  "end_quiet_warning_s": 2.0,
+  "max_sample_gap_warning_s": 1.0,
+  "max_pump_runtime_s": 120.0,
+  "minimum_pulses_per_run": 50,
+  "deviation_warning_percent": 3.0,
+  "density_plausible_kg_per_l": [0.95, 1.10],
+  "transfer": {
+    "flow_sensor_1": {
+      "pump_command": "transfer_pump_1",
+      "source_low_level": "line_1_tank_low",
+      "pump_runtime_s": 60.0,
+      "planned_runs": 5
+    },
+    "flow_sensor_2": {
+      "pump_command": "transfer_pump_2",
+      "source_low_level": "line_2_tank_low",
+      "pump_runtime_s": 60.0,
+      "planned_runs": 5
+    }
+  },
+  "manual_window": {
+    "flow_sensor_3": {
+      "description": "Pasteuriser flow; valve opened and closed by hand, no output is written"
+    }
+  }
+}

@@ -9,6 +9,7 @@ from scenarios import (  # noqa: F401  (imported for registration)
     gui,
     gui_data,
     historian,
+    manual,
     operator,
     shadow,
     startup_heating,

@@ -23,8 +23,18 @@ class TransferFlowStatus:
 
 
 def measured_flow(flow: FlowSignal | None, now: float) -> float | None:
-    """Fresh, valid, calibrated flow in L/min, else None."""
+    """Flow in L/min usable for control, else None.
+
+    Usable only when the pulse measurement is valid and fresh AND the K-factor
+    is valid and confirmed (flow_settings.json: pulses_per_litre set and
+    calibration_confirmed true). A provisional, unconfirmed factor gives an
+    L/min value for display and logging only; for control it counts as an
+    invalid measurement (transfer pump stopped, FLOW3 invalid), never as a
+    measured flow. This is the single entry point for flow in control.
+    """
     if flow is None or not flow.valid or flow.flow_lpm is None:
+        return None
+    if flow.calibrated is not True:
         return None
     if flow.sampled_at is None or now - flow.sampled_at > MAX_FLOW_AGE_S:
         return None

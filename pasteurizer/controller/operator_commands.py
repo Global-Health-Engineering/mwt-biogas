@@ -93,23 +93,49 @@ class OperatorCommands:
             True, "Fault storage reinitialised; GUI reset still required"))
 
     # MANUAL ----------------------------------------------------------------
-    def manual_request(self, user, command, value) -> CommandResult:
+    def manual_request(self, user, command, value, renew=False) -> CommandResult:
         result = self.manual.request(user, command, value, self.inputs.mode,
-                                     self.clock.monotonic())
-        return self._logged("MANUAL_REQUEST", user, result, command=command, value=value)
+                                     self.clock.monotonic(), renew=renew)
+        return self._logged("MANUAL_RENEW" if renew else "MANUAL_REQUEST", user, result,
+                            command=command, value=value)
 
-    def level_override(self, user, switch, value) -> CommandResult:
+    def manual_release(self, user, command) -> CommandResult:
+        """Withdraw a manual request. Only ever turns something off: any user."""
+        refused = require(user, *OPERATORS)
+        if refused:
+            return self._logged("MANUAL_RELEASE", user, refused, command=command)
+        removed = self.manual.release(command)
+        return self._logged("MANUAL_RELEASE", user, CommandResult(
+            True, "Request withdrawn" if removed else "No request active"), command=command)
+
+    def manual_clear(self, user, own=False, cause=None) -> CommandResult:
+        """Withdraw manual requests, level overrides and the valve-test allowance.
+
+        own=False: everything (ALL OFF button). own=True: only what this user
+        holds; the GUI sends it when the user's session ends (cause LOGOUT,
+        IDLE_EXPIRED, MAX_AGE_EXPIRED, GUI_STOPPED, PAGE_CLOSED).
+        """
+        refused = require(user, *OPERATORS)
+        if refused:
+            return self._logged("MANUAL_CLEAR", user, refused, own=bool(own), cause=cause)
+        requests, overrides = self.manual.clear(owner=user.name if own else None)
+        return self._logged("MANUAL_CLEAR", user, CommandResult(
+            True, f"Cleared {len(requests)} requests, {len(overrides)} overrides"),
+            requests=requests, overrides=overrides, own=bool(own), cause=cause)
+
+    def level_override(self, user, switch, value, renew=False) -> CommandResult:
         result = self.manual.override(user, switch, value, self.inputs.mode,
-                                      self.clock.monotonic())
-        return self._logged("LEVEL_OVERRIDE", user, result, switch=switch, value=value)
+                                      self.clock.monotonic(), renew=renew)
+        return self._logged("OVERRIDE_RENEW" if renew else "LEVEL_OVERRIDE", user, result,
+                            switch=switch, value=value)
 
     def cancel_override(self, user, switch) -> CommandResult:
         removed = self.manual.cancel_override(switch)
         return self._logged("OVERRIDE_CANCELLED", user, CommandResult(
             removed, "Removed" if removed else "None active"), switch=switch)
 
-    def allow_valve_test(self, user) -> CommandResult:
+    def allow_valve_test(self, user, renew=False) -> CommandResult:
         result = self.manual.allow_valve_test(user, self.inputs.mode,
-                                              self.clock.monotonic())
-        return self._logged("VALVE_TEST_OVERRIDE", user, result,
+                                              self.clock.monotonic(), renew=renew)
+        return self._logged("VALVE_TEST_RENEW" if renew else "VALVE_TEST_OVERRIDE", user, result,
                             pasteurizer_trip_latched=self.faults.summary().pasteurizer_trip)

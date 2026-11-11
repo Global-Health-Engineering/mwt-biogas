@@ -1,0 +1,46 @@
+# mwt-biogas plant controller: live inputs, outputs enabled.
+#
+# Install (adjust User and the paths if the repository is not /home/pi/mwt-biogas):
+#   sudo cp deploy/mwt-biogas-controller.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl start mwt-biogas-controller
+#   sudo systemctl enable mwt-biogas-controller     # start at boot (after commissioning)
+#
+# Behaviour (README, "Running on the RevPi"):
+#   start        run_controller writes all outputs off, then scans; READY=1 after
+#                the first scan with a successful write
+#   stop         systemctl stop sends SIGINT: orderly shutdown (safe frame, state,
+#                historian), then all outputs off; exit 0
+#   error/trip   unhandled error (exit 1) or in-process watchdog (exit 3): same
+#                shutdown, abnormal stop recorded
+#   hang         no WATCHDOG=1 for WatchdogSec: systemd kills the process (SIGABRT)
+#   any end      ExecStopPost runs safe_outputs: all outputs off again; when the
+#                service did not end with success it records the abnormal stop,
+#                so the restarted controller latches WATCHDOG_RESTART (GUI reset)
+#   restart      Restart=on-failure after 5 s; at most 3 starts in 10 min, then
+#                systemd gives up and the controller stays stopped (outputs off)
+#   SIGKILL      outputs keep their last value until ExecStopPost has run
+#   power loss / OS hang: not covered here (RevPi hardware watchdog: to be chosen)
+[Unit]
+Description=mwt-biogas plant controller (live inputs, outputs enabled)
+After=local-fs.target
+StartLimitIntervalSec=600
+StartLimitBurst=3
+
+[Service]
+Type=notify
+NotifyAccess=main
+User=pi
+WorkingDirectory=/home/pi/mwt-biogas
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 tools/run_controller.py
+ExecStopPost=/usr/bin/python3 tools/safe_outputs.py --state logs/controller_state.json
+KillSignal=SIGINT
+TimeoutStartSec=30
+TimeoutStopSec=20
+WatchdogSec=3
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

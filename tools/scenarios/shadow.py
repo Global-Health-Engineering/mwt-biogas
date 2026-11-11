@@ -1,4 +1,4 @@
-"""Shadow run: live inputs, outputs disabled (tools/run_shadow.py).
+"""Shadow run: live inputs, outputs disabled (tools/run_controller.py --outputs disabled).
 
 The RevPi library is replaced by a fake that records and refuses every write
 attempt, so these tests prove that nothing in the shadow path writes an
@@ -39,29 +39,39 @@ NOT_WRITTEN = "not written — outputs disabled"
 # A stand-in for revpimodio2: inputs readable, every write attempt recorded
 # (to FAKE_REVPI_WRITE_LOG) and refused.
 FAKE_REVPI = '''
+import json
 import os
 
 VALUES = {"I_4": True, "InputValue_1": 4054, "OutputValue_1": 4000}
 for _name in ("RTDValue_1", "RTDValue_2", "RTDValue_1_i04", "RTDValue_2_i04",
               "RTDValue_1_i05", "RTDValue_2_i05"):
     VALUES[_name] = 250                     # 25.0 C
+for _name, _value in json.loads(os.environ.get("FAKE_REVPI_VALUES", "{}")).items():
+    VALUES[_name] = _value
 COUNTS = {}
+READS = 0
 RESOLVED = []
-WRITES = []
+WRITES = []        # every write attempt (refused or done)
+OUTPUTS = {}       # values set by a writable (monitoring=False) instance
 
 
-def _refuse(what):
-    WRITES.append(what)
+def _log(line):
+    WRITES.append(line)
     path = os.environ.get("FAKE_REVPI_WRITE_LOG")
     if path:
         with open(path, "a") as file:
-            file.write(what + "\\n")
-    raise RuntimeError("fake RevPi: write attempted: " + what)
+            file.write(line + "\\n")
+
+
+def _refuse(what):
+    _log("REFUSED " + what)
+    raise RuntimeError("fake RevPi: write attempted in monitoring mode: " + what)
 
 
 class _Channel:
-    def __init__(self, name):
+    def __init__(self, name, owner):
         self._name = name
+        self._owner = owner
 
     @property
     def value(self):
@@ -72,13 +82,18 @@ class _Channel:
 
     @value.setter
     def value(self, new):
-        _refuse(f"{self._name}={new}")
+        if self._owner.kwargs.get("monitoring") is not False:
+            _refuse(f"{self._name}={new}")
+        self._owner.pending[self._name] = new
 
 
 class _IO:
+    def __init__(self, owner):
+        self._owner = owner
+
     def __getitem__(self, name):
         RESOLVED.append(name)
-        return _Channel(name)
+        return _Channel(name, self._owner)
 
 
 class RevPiModIO:
@@ -86,16 +101,31 @@ class RevPiModIO:
 
     def __init__(self, **kwargs):
         self.kwargs = kwargs
-        self.io = _IO()
+        self.pending = {}
+        self.io = _IO(self)
         RevPiModIO.instances.append(self)
-        if kwargs.get("monitoring") is not True:
-            _refuse("RevPiModIO opened without monitoring=True")
+        if kwargs.get("monitoring") is False:
+            _log("OPEN writable")
 
     def readprocimg(self):
+        global READS
+        READS += 1
+        stall = json.loads(os.environ.get("FAKE_REVPI_STALL", "null"))
+        if stall and READS == stall["after"]:
+            import time
+            time.sleep(stall["seconds"])        # the scan hangs once
         return True
 
     def writeprocimg(self):
-        _refuse("writeprocimg")
+        if self.kwargs.get("monitoring") is not False:
+            _refuse("writeprocimg")
+        OUTPUTS.update(self.pending)
+        _log("WRITE " + json.dumps(self.pending, sort_keys=True))
+        path = os.environ.get("FAKE_REVPI_OUTPUTS")
+        if path:
+            with open(path, "w") as file:
+                json.dump(OUTPUTS, file)
+        return True
 
     def setdefaultvalues(self):
         _refuse("setdefaultvalues")
@@ -215,12 +245,12 @@ def s82():
 @scenario(83, "Hardware reader in shadow run: monitoring mode, reads only, unused input not resolved")
 def s83():
     sys.path.insert(0, str(ROOT / "tools"))
-    import run_shadow
+    import run_controller
     from pasteurizer.hardware import HardwareReader
     fake, restore = load_fake_revpi()
     try:
         config = load_config()
-        reader = HardwareReader(mapping=run_shadow.reader_mapping(config))
+        reader = HardwareReader(mapping=run_controller.reader_mapping(config))
         kwargs = fake.RevPiModIO.instances[0].kwargs
         assert kwargs["monitoring"] is True and kwargs["autorefresh"] is False
         for _ in range(5):
@@ -267,9 +297,10 @@ def s85():
     write_log = folder / "writes.txt"
     port = free_port()
     env = dict(os.environ, PYTHONPATH=str(fake_revpi_dir()), FAKE_REVPI_WRITE_LOG=str(write_log))
-    command = [sys.executable, str(ROOT / "tools" / "run_shadow.py"), "--minutes", "0.12",
-               "--port", str(port), "--database", str(database), "--state", str(state),
-               "--lock", str(lock)]
+    command = [sys.executable, str(ROOT / "tools" / "run_controller.py"), "--outputs", "disabled",
+               "--minutes", "0.12", "--port", str(port), "--database", str(database),
+               "--state", str(state), "--lock", str(lock), "--token", str(folder / "token"),
+               "--command-port", str(free_port())]
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                text=True, cwd=ROOT, env=env)
     status = None
@@ -287,7 +318,7 @@ def s85():
     second = subprocess.run(command, capture_output=True, text=True, cwd=ROOT, env=env, timeout=30)
     output = process.communicate(timeout=30)[0]
     assert process.returncode == 0, output
-    assert second.returncode != 0 and "Another shadow run is active" in second.stderr + second.stdout
+    assert second.returncode != 0 and "Another controller is running" in second.stderr + second.stdout
     assert not write_log.exists(), write_log.read_text(encoding="utf-8")          # no write attempt at all
     assert "OUTPUTS DISABLED / SHADOW RUN" in output
     assert "safe frame NOT written (outputs disabled)" in output, output
@@ -330,16 +361,21 @@ def s85():
 
 @scenario(86, "Shadow files separate; GUI pages label shadow runs and unwritten outputs")
 def s86():
-    for name in ("simulation_state.json", "simulation.sqlite", "historian.sqlite"):
+    # Shadow files never shared with the simulation or the outputs-enabled run, and back.
+    refused = [("disabled", n) for n in ("simulation_state.json", "simulation.sqlite",
+                                         "historian.sqlite", "controller.sqlite",
+                                         "controller_state.json")]
+    refused += [("enabled", n) for n in ("shadow.sqlite", "shadow_state.json",
+                                             "simulation.sqlite")]
+    for outputs, name in refused:
         flag = "--state" if name.endswith(".json") else "--database"
-        result = subprocess.run([sys.executable, str(ROOT / "tools" / "run_shadow.py"), flag,
-                                 str(ROOT / "logs" / name)], capture_output=True, text=True,
-                                cwd=ROOT, timeout=30)
+        result = subprocess.run([sys.executable, str(ROOT / "tools" / "run_controller.py"),
+                                 "--outputs", outputs, flag, str(ROOT / "logs" / name)],
+                                capture_output=True, text=True, cwd=ROOT, timeout=30)
         assert result.returncode == 2 and "belongs to another run" in result.stderr, result.stderr
-    sys.path.insert(0, str(ROOT / "tools"))
-    import run_shadow
+    from pasteurizer.run_lock import RunLock
     path = Path(tempfile.mkdtemp()) / "run.lock"
-    first, second = run_shadow.RunLock(path), run_shadow.RunLock(path)
+    first, second = RunLock(path), RunLock(path)
     try:
         assert first.acquire() and not second.acquire()
         first.release()

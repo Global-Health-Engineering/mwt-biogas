@@ -211,6 +211,8 @@ class PlantController:
 
         requests = self.requests.build(inputs, flags, self.process, self.manual,
                                        self.faults, self.arbiter)
+        for kind, data in requests.events:
+            self.log.record(kind, **data)
         indicators = IndicatorInputs(
             process_state=self.process.state,
             warning=flags.summary.warning,

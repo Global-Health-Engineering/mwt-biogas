@@ -20,6 +20,8 @@ import os
 import sys
 import threading
 
+from pasteurizer.operator_interface import MANUAL_COMMANDS
+
 LOCALHOST = ("127.0.0.1", "localhost", "::1")
 
 
@@ -49,7 +51,26 @@ def config_info(config) -> dict:
         "model_validated": bool(config.treatment.get("model_validated", False)),
         "startup_thresholds_validated": bool(
             getattr(config.startup, "thresholds_validated", False)),
+        # For the manual panel: which RevPi channel each command drives.
+        "output_channels": _output_channels(config),
+        "pending_identification": sorted(
+            config.io_mapping.get("verification", {})
+            .get("valve_outputs_pending_identification", {}).values()),
+        "manual_commands": list(MANUAL_COMMANDS),
+        "request_expiry_s": control.manual.request_expiry_s,
+        "override_expiry_s": control.manual.override_expiry_s,
+        "level_roles": dict(config.level_roles),
     }
+
+
+def _output_channels(config) -> dict:
+    digital = config.io_mapping.get("digital_outputs", {})
+    channels = {command: digital.get(equipment, equipment)
+                for command, equipment in config.command_outputs.items()}
+    y4 = config.io_mapping.get("control_valve_Y4", {}).get("command")
+    if y4:
+        channels["control_valve_percent"] = y4
+    return channels
 
 
 # Bind failures by error code, never by message text (Windows messages differ

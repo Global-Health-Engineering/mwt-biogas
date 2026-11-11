@@ -36,6 +36,7 @@ class RequestSet:
     commands: OutputCommands
     permissions: OutputPermissions
     release_permitted: bool     # treatment permission held and Y4 commanded open
+    events: tuple = ()          # (kind, data) for the event log, e.g. a used-up drain STOP
 
 
 class _Frame:
@@ -46,6 +47,7 @@ class _Frame:
         self.requests["control_valve_percent"] = 0.0
         self.permitted = set()
         self.reasons = {}
+        self.events = []
 
     def request(self, name, value, permitted=True, reason=None):
         self.requests[name] = value
@@ -59,6 +61,7 @@ class _Frame:
             OutputCommands(**self.requests),
             OutputPermissions.only(*sorted(self.permitted), reasons=self.reasons),
             release,
+            tuple(self.events),
         )
 
 
@@ -76,7 +79,7 @@ class OutputRequestBuilder:
         frame = _Frame()
         manual_requests = manual.active_requests() if inputs.mode == Mode.MANUAL else {}
         self._transfer_pumps(frame, inputs, manual_requests, faults, arbiter)
-        self._manhole_drain(frame, inputs, manual_requests)
+        self._manhole_drain(frame, inputs, manual_requests, manual)
         self._overflow_valves(frame, inputs, manual_requests)
         release = False
         if inputs.mode == Mode.AUTO:
@@ -111,13 +114,23 @@ class OutputRequestBuilder:
             frame.request(name, on, permitted,
                           f"Transfer {line} fault" if blocked else None)
 
-    def _manhole_drain(self, frame, inputs, manual_requests):
+    def _manhole_drain(self, frame, inputs, manual_requests, manual):
         if not inputs.acquisition_ok:
             return
-        if inputs.mode == Mode.MANUAL and "manhole_drain" in manual_requests:
-            self.drain.request_manual(bool(manual_requests["manhole_drain"]))
-        decision = self.drain.process(inputs.effective, inputs.now)
-        frame.request("manhole_drain", decision.request.on)
+        requested = manual_requests.get("manhole_drain")     # {} outside MANUAL
+        decision = self.drain.process(
+            inputs.effective, inputs.now,
+            manual_request=None if requested is None else bool(requested),
+            issued_at=manual.issued_at("manhole_drain"))
+        if decision.stop_ended_by_water:
+            # Spec 10: a manual STOP lasts until a new water event. The request
+            # is withdrawn, so the page's renewal cannot restore it.
+            holder = manual.requests["manhole_drain"].user
+            manual.release("manhole_drain")
+            frame.events.append(("MANUAL_RELEASE_AUTOMATIC", {
+                "command": "manhole_drain", "user": holder,
+                "cause": "New water event ends the manual STOP; automatic drainage resumes"}))
+        frame.request("manhole_drain", decision.request.on)    # off while STOP-inhibited
 
     def _overflow_valves(self, frame, inputs, manual_requests):
         for line in LINES:

@@ -1,0 +1,23 @@
+# mwt-biogas GUI (separate process; never touches RevPi I/O).
+#
+#   sudo cp deploy/mwt-biogas-gui.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now mwt-biogas-gui
+#
+# Binds to 127.0.0.1:8080 only; reach it through the SSH/Tailscale tunnel.
+# Logins: secrets/users.json (tools/manage_users.py). Stopping or crashing the
+# GUI switches nothing on: manual requests expire in the controller.
+[Unit]
+Description=mwt-biogas GUI (localhost)
+After=mwt-biogas-controller.service
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/mwt-biogas
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 tools/run_gui.py --database logs/controller.sqlite
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -191,12 +191,13 @@ def s76():
         for path in ("/", "/log", "/static/app.js", "/static/style.css"):
             assert request(port, path, raw=True)[0] == 200, path
         page = request(port, "/", raw=True)[1]
-        assert "Read-only" in page and "<form" not in page          # nothing to submit
+        assert "Read-only" in page and "action=" not in page   # no form submits by itself
         for path in ("/static/../server.py", "/static/%2e%2e/server.py",
                      "/static/..%2fserver.py", "/static/../../pasteurizer/publisher.py"):
             assert request(port, path, raw=True)[0] == 404, path
         for method in ("POST", "PUT", "DELETE", "PATCH"):
-            assert request(port, "/api/live", method)[0] == 405
+            for path in ("/api/live", "/api/events", "/api/meta", "/"):
+                assert request(port, path, method)[0] == 405, (method, path)
         code, live = request(port, "/api/live")
         assert code == 200 and live["state"] == "CONNECTED"
         assert live["status"]["data_source"] == "SIMULATED"
@@ -207,10 +208,17 @@ def s76():
         assert manual == {"EDB-VL-03", "EDB-VL-04", "EDB-VL-09", "EDB-VL-10",
                           "EDB-VL-13", "GPST-VL-07"}
         assert rig.gui.host == "127.0.0.1"
-        # The browser pages send no commands: no fetch with a method other than GET.
-        for name in ("app.js", "log.js", "trends.js", "common.js"):
+        # Pages POST only to the login, logout and command routes.
+        import re
+        for name in ("app.js", "log.js", "trends.js", "common.js", "views.js", "manual.js"):
             text = (ROOT / "gui" / "static" / name).read_text(encoding="utf-8")
-            assert "method:" not in text and "POST" not in text, name
+            targets = set(re.findall(r'UI\.post\("([^"]+)"', text))
+            assert targets <= {"/api/login", "/api/logout", "/api/command"}, (name, targets)
+            if name not in ("common.js", "manual.js"):
+                assert 'method: "POST"' not in text, name
+        # Without a users file nobody can log in, and commands need a login.
+        session = request(port, "/api/session")[1]
+        assert session["user"] is None and session["logins"] is False
     finally:
         rig.close()
     link = ControllerLink("http://127.0.0.1:9")          # nothing listens there

@@ -8,6 +8,7 @@
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { margin: 0; background: var(--bg); color: var(--text); font-size: 14px; }
 .muted { color: var(--muted); }
 .note { color: var(--warn); }
@@ -21,6 +22,7 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px
 .badge-sim { background: var(--sim); color: #1b1300; }
 .badge-live { background: #1f6f43; color: #fff; }
 .badge-shadow { background: repeating-linear-gradient(135deg, #7a1fa2 0 10px, #5b1677 10px 20px); color: #fff; }
+.badge-outputs { background: #b3261e; color: #fff; }
 .shadow-banner { margin: 8px 14px 0; padding: 8px 12px; border: 2px solid #b04fd6; border-radius: 6px; background: rgba(176, 79, 214, .12); }
 .plant-lamp.cmd-only { background: transparent !important; border: 2px dashed #9aa7b4; }
 .plant-lamp.cmd-only.lamp-green:not(.mode-off) { border-color: #2ecc71; }
@@ -151,4 +153,25 @@ main.wide { grid-template-columns: minmax(0, 1fr); }
 .row-stale td { color: var(--muted); }
 .y4.stale { fill: var(--muted); }
 .temp-tag { font-size: 11.5px; font-weight: 700; fill: var(--text); }
+/* Login and manual panel */
+.dialog { position: fixed; inset: 0; background: rgba(0, 0, 0, .6); display: flex; align-items: center; justify-content: center; z-index: 10; }
+.dialog[hidden] { display: none; }
+.dialog form { width: 360px; display: flex; flex-direction: column; gap: 10px; }
+.dialog label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); }
+.dialog-buttons { display: flex; gap: 8px; }
+button.danger { background: #b3261e; }
+.small-btn { padding: 2px 8px; font-size: 12px; }
+.operator-actions { display: inline-flex; gap: 6px; }
+.manual-head h2 { margin: 4px 0 8px; }
+.manual-buttons { display: flex; gap: 10px; flex-wrap: wrap; margin: 8px 0; }
+.output-note { padding: 8px 12px; border-radius: 6px; font-weight: 600; }
+.output-live { background: rgba(231, 76, 60, .15); border: 2px solid var(--crit); }
+.output-held { background: rgba(242, 179, 61, .12); border: 2px solid var(--warn); }
+.output-shadow { background: rgba(176, 79, 214, .12); border: 2px solid #b04fd6; }
+.blockers { color: var(--warn); margin: 6px 0; }
+table.manual { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
+table.manual th, table.manual td { text-align: left; padding: 6px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+table.manual th { color: var(--muted); font-weight: 500; }
+table.manual input[type=number] { width: 64px; }
+.row-active { background: rgba(51, 209, 122, .08); box-shadow: inset 4px 0 0 var(--on); }
 @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }

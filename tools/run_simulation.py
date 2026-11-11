@@ -27,9 +27,11 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 from pasteurizer.clock import FakeClock, MonotonicClock  # noqa: E402
 from pasteurizer.clock_sync import KernelClockSync  # noqa: E402
+from pasteurizer.command_server import CommandServer  # noqa: E402
 from pasteurizer.controller import PlantController  # noqa: E402
 from pasteurizer.event_log import EventLog  # noqa: E402
 from pasteurizer.historian import Historian  # noqa: E402
+from pasteurizer.modes import Mode  # noqa: E402
 from pasteurizer.persistence import FileStore  # noqa: E402
 from pasteurizer.publisher import StatusPublisher  # noqa: E402
 from pasteurizer.simulated_io import PlantParameters, SimulatedPlant  # noqa: E402
@@ -86,6 +88,10 @@ def main():
     parser.add_argument("--port", type=int, default=8081, help="status publisher port")
     parser.add_argument("--fault", action="append", default=[], type=parse_fault)
     parser.add_argument("--minutes", type=float, default=None, help="stop after (real)")
+    parser.add_argument("--selector", choices=("AUTO", "MANUAL", "OFF"), default="AUTO",
+                        help="simulated selector S1 position")
+    parser.add_argument("--token", type=Path, default=ROOT / "logs" / "command.token")
+    parser.add_argument("--command-port", type=int, default=8082)
     args = parser.parse_args()
     if not 0.1 <= args.speed <= 20:
         parser.error("--speed must be between 0.1 and 20")
@@ -101,6 +107,7 @@ def main():
         clock, wall = MonotonicClock(), time.time
     plant = SimulatedPlant(config, clock, PlantParameters(**FAST))
     plant.bath_c = args.bath
+    plant.mode = Mode[args.selector]
     plant.tank[1] = args.tank1
     store = TestSqliteStore(args.database, config.control.logging)
     historian = Historian(store, config.control.logging, wall_clock=wall,
@@ -111,6 +118,11 @@ def main():
     if not publisher.start():
         print(f"Status publisher not started: {publisher.error_category} on port {args.port} "
               f"(code {publisher.error_code}: {publisher.error}); controller runs anyway")
+
+    commands = CommandServer(token_path=args.token, port=args.command_port)
+    if not commands.start():
+        print(f"Command server not started: {commands.error_category} ({commands.error}); "
+              "GUI commands unavailable")
 
     def watchdog_trip():
         plant.watchdog_shutdown()
@@ -145,6 +157,7 @@ def main():
                     print(f"{elapsed:7.1f}s fault {name} {'ON' if on else 'OFF'}")
             stalled = any(on for (name, _), on in active.items() if name == "stall")
             if not stalled:
+                commands.execute_pending(ctl)
                 status = ctl.cycle()
                 if ctl.cycle_count % 25 == 0:
                     print(f"{elapsed:7.1f}s {status.state:18s} {status.state_reason}")
@@ -154,6 +167,7 @@ def main():
         pass
     finally:
         stop.set()
+        commands.stop()
         result = ctl.shutdown("simulation stopped")
         publisher.stop()
         print(f"Stopped: safe frame written {result.safe_frame_written}, "

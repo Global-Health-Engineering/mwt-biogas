@@ -17,12 +17,15 @@ function writtenText(st, format) {
   if (isShadow(st)) return NOT_WRITTEN;
   return st.write_ok ? format(st.written) : "not confirmed (write failed)";
 }
-// Uncalibrated flow: the pulse input can be valid while L/min is unavailable.
+// Uncalibrated flow: the pulse input can be valid while L/min is unavailable,
+// or shown from an unconfirmed factor; the controller uses neither for control.
+const UNCONFIRMED = "calibration not confirmed: not used for control";
 function flowText(f) {
   if (!f || !f.valid) return { value: "Unavailable", pulses: null, lpm: false };
   const hz = f.pulse_rate_hz == null ? "—" : f.pulse_rate_hz.toFixed(2);
   const pulses = `${f.raw_counter} pulses · ${hz} pulses/s`;
   if (f.flow_lpm == null) return { value: "L/min unavailable", pulses, hz, lpm: false };
+  if (f.calibrated !== true) return { value: `${f.flow_lpm.toFixed(2)} L/min (unconfirmed)`, pulses, hz, lpm: false, unconfirmed: true };
   return { value: `${f.flow_lpm.toFixed(2)} L/min`, pulses, hz, lpm: true };
 }
 
@@ -39,9 +42,16 @@ function renderHeader() {
   const src = st ? st.data_source : "UNKNOWN";
   const badge = $("#source");
   const shadow = isShadow(st);
-  badge.textContent = shadow ? SHADOW_TEXT : src === "SIMULATED" ? "SIMULATION" : src === "LIVE" ? "LIVE" : "SOURCE UNKNOWN";
-  badge.className = "badge " + (shadow ? "badge-shadow" : src === "SIMULATED" ? "badge-sim" : src === "LIVE" ? "badge-live" : "badge-unknown");
-  $("#shadow-banner").hidden = !shadow;
+  const live = !shadow && src === "LIVE";
+  badge.textContent = shadow ? SHADOW_TEXT : live ? "LIVE — OUTPUTS ENABLED"
+    : src === "SIMULATED" ? "SIMULATION" : "SOURCE UNKNOWN";
+  badge.className = "badge " + (shadow ? "badge-shadow" : live ? "badge-outputs" : src === "SIMULATED" ? "badge-sim" : "badge-unknown");
+  const banner = $("#shadow-banner");
+  banner.hidden = !shadow;
+  if (shadow) {
+    banner.className = "shadow-banner";
+    banner.innerHTML = `<b>${SHADOW_TEXT}.</b> Commands are computed from the real inputs but never written to an output: pumps, heaters and valves do not move. Hollow lamps show commands only. Faults that wait for an actuator response are expected.`;
+  }
 
   const conn = $("#conn");
   const age = v && v.age_s != null ? `${v.age_s.toFixed(1)} s` : "—";
@@ -66,11 +76,11 @@ function renderHeader() {
   for (const [colour, text] of [["green", "Pasteurizing"], ["yellow", "Warning"], ["red", "Fault"]]) {
     const el = $(`#lamp-${colour}`);
     const mode = isLive() && modes ? modes[colour] : "unknown";
-    el.className = `plant-lamp lamp-${colour} mode-${mode}${shadow ? " cmd-only" : ""}`;
+    el.className = `plant-lamp lamp-${colour} mode-${mode}${isShadow(st) ? " cmd-only" : ""}`;
     let label = text + (mode === "blinking" ? " (blinking)" : mode === "off" ? " off" : "");
     if (colour === "red" && mode === "blinking") label = "Fallback path (red blinking)";
     if (mode === "unknown") label = `${text}: unknown`;
-    if (shadow && mode !== "unknown") label += " — command, not written";
+    if (isShadow(st) && mode !== "unknown") label += " — command, not written";
     el.title = label;
     $(`#lamp-${colour}-text`).textContent = label;
   }
@@ -130,8 +140,8 @@ function renderEquipment() {
       const ft = flowText(f);
       const notes = [];
       if (ft.lpm && age !== null && age > FLOW_STALE_S) notes.push(`Stale ${age.toFixed(0)} s`);
+      if (ft.unconfirmed) notes.push(UNCONFIRMED);
       if (ft.pulses && !ft.lpm) notes.push(`${ft.hz} pulses/s`);   // counts in the detail panel
-      else if (f && f.calibrated === false) notes.push("Uncalibrated");
       if (!live) notes.push("stale");
       // L/min unavailable is not a fault in the pulse input: amber, smaller text.
       setText(`[data-value="${id}"]`, ft.value, !live ? "bad" : ft.lpm ? "" : ft.pulses ? "uncal" : "bad");
@@ -271,7 +281,7 @@ function renderDetail() {
       rows.push(`<tr><th>Pulse input</th><td>${r.valid ? "valid" : "invalid"}${r.error ? " · " + UI.esc(r.error) : ""}</td></tr>`,
         `<tr><th>Pulse counter</th><td>${r.raw_counter ?? "—"}</td></tr>`,
         `<tr><th>Pulse rate</th><td>${r.pulse_rate_hz == null ? "—" : r.pulse_rate_hz.toFixed(2) + " pulses/s"}</td></tr>`,
-        `<tr><th>Flow</th><td>${ft.lpm ? ft.value : r.valid ? "L/min unavailable — calibration pending (pulses per litre not set)" : "Unavailable"}</td></tr>`);
+        `<tr><th>Flow</th><td>${ft.lpm ? ft.value : ft.unconfirmed ? `${ft.value} — ${UNCONFIRMED}` : r.valid ? "L/min unavailable — calibration pending (pulses per litre not set)" : "Unavailable"}</td></tr>`);
     } else if (r) {
       const value = r.celsius ?? r.flow_lpm ?? (r.reached === true ? "Reached" : r.reached === false ? "Not reached" : null);
       rows.push(`<tr><th>Value</th><td>${r.valid && value != null ? (typeof value === "number" ? value.toFixed(2) + " " + (e.units || "") : value) : "Unavailable"}</td></tr>`,
@@ -301,14 +311,17 @@ function renderAlarms() {
     : `${alarms.length} active or latched at the last snapshot · controller data not current, alarms may have changed`;
   $("#alarm-panel").classList.toggle("last-known", !live);
   if (!alarms.length) {
-    body.innerHTML = `<tr><td colspan="6" class="muted">${!st ? "No controller data." : live ? "No active alarms." : "No alarms at the last snapshot."}</td></tr>`;
+    body.innerHTML = `<tr><td colspan="7" class="muted">${!st ? "No controller data." : live ? "No active alarms." : "No alarms at the last snapshot."}</td></tr>`;
     return;
   }
+  const canAck = SESSION.user && live;
   body.innerHTML = alarms.map((a) => `<tr class="${a.severity === "CRITICAL" ? "row-critical" : "row-warning"}${live ? "" : " row-stale"}">
     <td>${UI.severity(a.severity)}</td><td>${UI.time(a.raised_utc)}</td>
     <td>${(a.equipment || []).map((id) => UI.esc(UI.tagOf(APP.meta, id))).join(", ") || "Plant"}</td>
     <td><b>${UI.esc(a.code)}</b> ${UI.esc(a.message)}</td><td>${UI.esc(a.consequence)}</td>
-    <td>${live ? "" : "Last known: "}${alarmStatus(a)} · ${a.acknowledged ? "Acknowledged" : "Not acknowledged"}</td></tr>`).join("");
+    <td>${live ? "" : "Last known: "}${alarmStatus(a)} · ${a.acknowledged ? "Acknowledged" : "Not acknowledged"}</td>
+    <td>${canAck && !a.acknowledged ? `<button class="secondary small-btn" data-ack="${UI.esc(a.code)}">Acknowledge</button>` : ""}</td></tr>`).join("");
+  for (const b of $$("[data-ack]", body)) b.onclick = () => MANUAL.send("acknowledge", { code: b.dataset.ack });
 }
 
 function alarmStatus(a) {
@@ -332,6 +345,7 @@ async function poll() {
   renderEquipment();
   renderCard();
   renderAlarms();
+  MANUAL.render();
   $("#footer-config").textContent = APP.view.status ? `config ${APP.view.status.config_hash.slice(0, 12)} · run ${APP.view.status.boot_id.slice(0, 8)}` : "";
 }
 
@@ -342,8 +356,9 @@ function showTab(tab) {
   $("#view-edibl").hidden = tab !== "edibl";
   $("#view-pasteurizer").hidden = tab !== "pasteurizer";
   $("#view-trends").hidden = tab !== "trends";
-  $("#side").hidden = tab === "trends";
-  document.querySelector("main").classList.toggle("wide", tab === "trends");
+  $("#view-manual").hidden = tab !== "manual";
+  $("#side").hidden = tab === "trends" || tab === "manual";
+  document.querySelector("main").classList.toggle("wide", tab === "trends" || tab === "manual");
   if (tab === "trends") TRENDS.show();
   renderCard();
 }
@@ -360,6 +375,7 @@ async function init() {
   for (const b of $$("nav [data-tab]")) b.onclick = () => showTab(b.dataset.tab);
   $("#open-log").onclick = () => window.open("/log", "mwt-biogas-log", "width=1200,height=800");
   TRENDS.init();
+  MANUAL.init();
   showTab("edibl");
   await poll();
   setInterval(poll, 1000);

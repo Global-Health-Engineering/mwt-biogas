@@ -56,10 +56,15 @@ class PersistentState:
 
 
 class FileStore:
-    """JSON file, replaced atomically (write temp, fsync, rename)."""
+    """JSON file, replaced atomically (write temp, fsync, rename).
 
-    def __init__(self, path):
+    temporary_suffix: a second writer in another thread (the watchdog marker)
+    uses its own temporary file, so two saves never write into one file.
+    """
+
+    def __init__(self, path, temporary_suffix=".tmp"):
         self.path = Path(path)
+        self.temporary_suffix = temporary_suffix
 
     def load(self) -> PersistentState:
         try:
@@ -72,7 +77,7 @@ class FileStore:
 
     def save(self, state: PersistentState):
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self.path.with_suffix(self.path.suffix + ".tmp")
+        temporary = self.path.with_suffix(self.path.suffix + self.temporary_suffix)
         with open(temporary, "w", encoding="utf-8") as file:
             file.write(state.to_json())
             file.flush()
@@ -86,6 +91,25 @@ class FileStore:
             os.fsync(directory)
         finally:
             os.close(directory)
+
+
+def mark_abnormal_stop(path) -> str:
+    """Record an abnormal end (watchdog, crash, kill) in the state file, so the
+    next start latches WATCHDOG_RESTART and waits for a GUI reset (spec 13).
+
+    Used by the runner's watchdog and exception handling and by
+    tools/safe_outputs.py as systemd ExecStopPost. Returns what happened.
+    """
+    store = FileStore(path, temporary_suffix=".mark.tmp")
+    try:
+        state = store.load()
+    except StorageError as error:
+        return f"not marked ({error}); the next start latches FAULT_STORAGE instead"
+    if state.watchdog_tripped:
+        return "already marked"
+    state.watchdog_tripped = True
+    store.save(state)
+    return "marked"
 
 
 class MemoryStore:

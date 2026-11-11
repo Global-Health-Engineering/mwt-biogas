@@ -37,13 +37,19 @@ CYCLE = 0.2
 FAST = dict(bath_heat_capacity_j_k=16_000.0)
 
 
-def make_config(control=None, arbiter=None):
-    """Copy config/ with pretend flow factors and optional overrides."""
+def make_config(control=None, arbiter=None, flow_confirmed=True):
+    """Copy config/ with pretend flow factors and optional overrides.
+
+    The simulation's factor (2000 pulses/L) is PRETEND and marked confirmed
+    only in this temporary copy, so simulated flows are usable for control;
+    config/flow_settings.json itself stays unassigned.
+    """
     tmp = Path(tempfile.mkdtemp())
     shutil.copytree(ROOT / "config", tmp, dirs_exist_ok=True)
     flows = json.loads((tmp / "flow_settings.json").read_text())
     for options in flows.values():
         options["pulses_per_litre"] = 2000.0         # PRETEND for simulation
+        options["calibration_confirmed"] = flow_confirmed
     (tmp / "flow_settings.json").write_text(json.dumps(flows))
     for name, changes in (("control_settings.json", control),
                           ("arbiter_settings.json", arbiter)):
@@ -86,8 +92,9 @@ class TestSqliteStore(SqliteStore):
 class Sim:
     def __init__(self, *, control=None, arbiter=None, params=None, store=None,
                  simulated_io=True, bath=None, battery=None, start_time=1000.0,
-                 plant=None, clock=None, history=None, database=None, background=False):
-        self.config = make_config(control, arbiter)
+                 plant=None, clock=None, history=None, database=None, background=False,
+                 flow_confirmed=True):
+        self.config = make_config(control, arbiter, flow_confirmed)
         self.clock = clock or FakeClock(start_time)
         self.plant = plant or SimulatedPlant(self.config, self.clock,
                                              PlantParameters(**(params or {})))

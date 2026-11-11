@@ -40,8 +40,11 @@ def describe(kind, data) -> tuple[str, str, list, str | None]:
         text = f"Selector {data.get('old')} → {data.get('new')}"
     elif kind == "OPERATOR_ACTION":
         verdict = "accepted" if data.get("accepted") else "refused"
-        text = (f"{data.get('action')} by {data.get('user')} ({data.get('role')}): "
-                f"{verdict}, {data.get('outcome')}")
+        target = " ".join(f"{key}={data[key]}" for key in ("command", "value", "switch", "code", "cause")
+                          if data.get(key) is not None)
+        text = (f"{data.get('action')}{' ' + target if target else ''} by {data.get('user')} "
+                f"({data.get('role')}): {verdict}, {data.get('outcome')}")
+        return "INFO", text, [data[k] for k in ("command", "switch") if data.get(k)], None
     elif kind in ("OUTPUT_WRITTEN", "OUTPUT_REQUESTED", "OUTPUT_NOT_WRITTEN"):
         prefix = {"OUTPUT_WRITTEN": "Written", "OUTPUT_REQUESTED": "Requested",
                   "OUTPUT_NOT_WRITTEN": "NOT WRITTEN (outputs disabled, shadow run); command"}[kind]
@@ -60,11 +63,26 @@ def describe(kind, data) -> tuple[str, str, list, str | None]:
         if data.get("outputs_enabled") is False:
             text = (f"Controller started: {data.get('data_source', '?')} inputs, outputs DISABLED "
                     "(shadow run, nothing is written)")
+        elif data.get("output_policy") == "MANUAL_ONLY":       # records of the commissioning gate
+            text = (f"Controller started: {data.get('data_source', '?')} inputs, outputs ENABLED "
+                    "in MANUAL only (commissioning)")
+        elif data.get("data_source") == "LIVE":
+            text = "Controller started: LIVE inputs, outputs ENABLED"
+        if data.get("watchdog_restart"):
+            text += "; after a watchdog shutdown or abnormal stop (WATCHDOG_RESTART latched)"
     elif kind == "INDICATORS":
         lights = [name for name, on in (("warning", data.get("warning")), ("trip", data.get("trip")),
                                         ("release permitted", data.get("release_permitted")),
                                         ("fallback path", data.get("fallback_path"))) if on]
         text = f"Indicator lights for {data.get('process_state')}: {', '.join(lights) or 'none active'}"
+    elif kind == "MANUAL_RELEASE_AUTOMATIC":
+        text = f"Manual request {data.get('command')} of {data.get('user')} withdrawn: {data.get('cause')}"
+    elif kind == "OUTPUT_GATE":            # records of the former commissioning gate
+        if data.get("open"):
+            text = f"Outputs enabled: selector {data.get('mode')} (policy {data.get('policy')})"
+        else:
+            text = (f"Outputs held off: selector {data.get('mode')}, policy {data.get('policy')} "
+                    "(commissioning: outputs only in MANUAL)")
     elif kind == "CONTROLLER_STOP":
         text = f"Controller stopped: {data.get('reason')}"
         if data.get("outputs_enabled") is False:

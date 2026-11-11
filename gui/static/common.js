@@ -12,6 +12,23 @@ const UI = {
     return response.json();
   },
 
+  /* Commands and logins: JSON POST with the header the GUI server requires. */
+  async post(url, body) {
+    const response = await fetch(url, {
+      method: "POST", cache: "no-store", credentials: "same-origin",
+      headers: { "Content-Type": "application/json", "X-Requested-With": "mwt-gui" },
+      body: JSON.stringify(body || {}),
+    });
+    let data = {};
+    try { data = await response.json(); } catch (e) { /* not JSON */ }
+    if (!response.ok) {
+      const error = new Error(data.error || response.statusText);
+      error.status = response.status;
+      throw error;
+    }
+    return data;
+  },
+
   esc(text) {
     return String(text ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   },
