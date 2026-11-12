@@ -14,13 +14,13 @@
     "flow_sensor_1": {
       "pump_command": "transfer_pump_1",
       "source_low_level": "line_1_tank_low",
-      "pump_runtime_s": 60.0,
+      "pump_runtime_s": 45.0,
       "planned_runs": 5
     },
     "flow_sensor_2": {
       "pump_command": "transfer_pump_2",
       "source_low_level": "line_2_tank_low",
-      "pump_runtime_s": 60.0,
+      "pump_runtime_s": 45.0,
       "planned_runs": 5
     }
   },
