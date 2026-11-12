@@ -1,0 +1,28 @@
+[
+  {
+    "saved_at_utc": "2026-11-12T12:49:41.816Z",
+    "sensor_id": "flow_sensor_1",
+    "previous_pulses_per_litre": null,
+    "previous_calibration_confirmed": false,
+    "new_pulses_per_litre": 1109.79,
+    "calibration_confirmed_set_to": false,
+    "accepted_runs": 5,
+    "max_abs_deviation_percent": 1.1616123354885688,
+    "source_export": "exports/flow_calibration/flow_sensor_1_calibration_20261112T124920Z.csv",
+    "backup_file": "flow_settings.json.20261112T124941Z.bak",
+    "software_commit": "22dbe18+uncommitted"
+  },
+  {
+    "saved_at_utc": "2026-11-12T13:01:49.536Z",
+    "sensor_id": "flow_sensor_2",
+    "previous_pulses_per_litre": null,
+    "previous_calibration_confirmed": false,
+    "new_pulses_per_litre": 1088.06,
+    "calibration_confirmed_set_to": false,
+    "accepted_runs": 5,
+    "max_abs_deviation_percent": 0.9830801077793728,
+    "source_export": "exports/flow_calibration/flow_sensor_2_calibration_20261112T130131Z.csv",
+    "backup_file": "flow_settings.json.20261112T130149Z.bak",
+    "software_commit": "22dbe18+uncommitted"
+  }
+]
