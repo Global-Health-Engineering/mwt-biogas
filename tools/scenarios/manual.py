@@ -309,7 +309,7 @@ def s98():
     # START (True) is automatic, never a run without water.
     sim.plant.mode = Mode.MANUAL
     sim.plant.manhole_water = False
-    sim.run(25)
+    sim.run(65)                                           # past the 60 s run-on delay
     assert cmd.manual_request(COMMISSIONER, "manhole_drain", True).accepted
     sim.run(15)
     assert not sim.out("manhole_drain"), "no manual run without water"
@@ -322,7 +322,7 @@ def s98():
         live.run(4)
         assert live.ctl.commands.level_override(COMMISSIONER, sw, True, renew=True).accepted
     assert live.out("manhole_drain"), "override renewed for 12 s: drain runs"
-    live.run(31)                                          # override expired 10 s; run-on 20 s
+    live.run(71)                                          # override expired 10 s; run-on 60 s
     assert not live.out("manhole_drain")
 
 

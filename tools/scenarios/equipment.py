@@ -23,26 +23,37 @@ def s17():
     assert sim.out("manhole_drain"), "drain works in OFF"
 
 
-@scenario(18, "Overflow valve: clear at 5 s closes at 30 s, at 40 s closes at 50 s")
+@scenario(18, "Overflow valve: opens after 5 s detection; closes after 10 s min open and 2 s clear")
 def s18():
     sim = Sim(params=FAST, bath=70.0)
     roles = sim.config.level_roles
     sw = roles["line_1_tank_overflow"]
+    opened = lambda s: s.out("overflow_valve_1_open")
+    closed = lambda s: not s.out("overflow_valve_1_open")
+    # A 3 s splash does not open the valve.
     sim.plant.faults.forced_switches[sw] = True
-    sim.run(0.6)
+    assert not sim.run(3.0, until=opened), "opened before the 5 s confirmation"
+    sim.plant.faults.forced_switches[sw] = False
+    assert not sim.run(10.0, until=opened), "short detection must not open later"
+    # 5 s of detection opens; clear 2 s after opening -> min_open_s (10 s) decides.
+    sim.plant.faults.forced_switches[sw] = True
+    t_detect = sim.clock.monotonic()
+    assert sim.run(8.0, until=opened)
+    assert 4.9 <= sim.clock.monotonic() - t_detect <= 5.8, sim.clock.monotonic() - t_detect
+    t_open = sim.clock.monotonic()
+    sim.run(2.0)
+    sim.plant.faults.forced_switches[sw] = False
+    assert sim.run(15.0, until=closed)
+    assert 9.8 <= sim.clock.monotonic() - t_open <= 10.8, sim.clock.monotonic() - t_open
+    # Covered for 20 s after opening -> closes 2 s after the switch clears.
+    sim.plant.faults.forced_switches[sw] = True
+    assert sim.run(8.0, until=opened)
+    sim.run(20.0)
     assert sim.out("overflow_valve_1_open")
-    t_open = sim.clock.monotonic()
-    sim.run(4.4)
     sim.plant.faults.forced_switches[sw] = False
-    assert sim.run(40, until=lambda s: not s.out("overflow_valve_1_open"))
-    assert 29.4 <= sim.clock.monotonic() - t_open <= 31.0, sim.clock.monotonic() - t_open
-    sim.plant.faults.forced_switches[sw] = True
-    sim.run(0.6)
-    t_open = sim.clock.monotonic()
-    sim.run(39.4)
-    sim.plant.faults.forced_switches[sw] = False
-    assert sim.run(20, until=lambda s: not s.out("overflow_valve_1_open"))
-    assert 49.4 <= sim.clock.monotonic() - t_open <= 51.0
+    t_clear = sim.clock.monotonic()
+    assert sim.run(6.0, until=closed)
+    assert 1.9 <= sim.clock.monotonic() - t_clear <= 2.8, sim.clock.monotonic() - t_clear
 
 
 @scenario(19, "Pump 1 ON without pulses: Level 2 after 10 s + 10 s; others continue")

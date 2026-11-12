@@ -133,6 +133,7 @@ class TransferFlowSettings:
 
 @dataclass(frozen=True)
 class OverflowSettings:
+    open_after_detect_s: float = num(0.0, 600.0)
     min_open_s: float = num(0.0, 3600.0)
     close_after_clear_s: float = num(0.0, 3600.0)
 
