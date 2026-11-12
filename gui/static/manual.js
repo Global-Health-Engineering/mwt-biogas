@@ -60,7 +60,7 @@ const MANUAL = (() => {
   }
 
   function showMessage() {
-    for (const id of ["manual-message", "op-message"]) {
+    for (const id of ["manual-message", "detail-manual-message", "op-message"]) {
       const el = document.getElementById(id);
       if (el) { el.textContent = message.text; el.className = message.ok ? "muted" : "note"; }
     }
@@ -147,21 +147,46 @@ const MANUAL = (() => {
     return ["live", "Outputs ENABLED: accepted commands switch the RevPi outputs (relays)."];
   }
 
+  /* Buttons for one output (manual tab and the detail panel). */
+  function actionButtons(cmd, enabled) {
+    const dis = enabled ? "" : "disabled";
+    return cmd === DRAIN
+      ? `<button data-on="${cmd}" data-value="0" class="danger" ${dis}>STOP (inhibit)</button>
+         <button data-off="${cmd}" class="secondary" ${dis}>Automatic</button>`
+      : cmd === "control_valve_percent"
+      ? `<input type="number" min="0" max="100" step="1" value="0" data-y4-input ${dis}> %
+         <button data-set="${cmd}" ${dis}>Set</button>
+         <button data-off="${cmd}" class="secondary" ${dis}>Close (release)</button>`
+      : `<button data-on="${cmd}" ${dis}>${isValve(cmd) ? "Open" : "ON"}</button>
+         <button data-off="${cmd}" class="secondary" ${dis}>${isValve(cmd) ? "Close" : "OFF"}</button>`;
+  }
+
+  function overrideButtons(sw, enabled) {
+    const dis = enabled ? "" : "disabled";
+    return `<button data-ov="${sw}" data-val="1" class="secondary" ${dis}>Force reached</button>
+      <button data-ov="${sw}" data-val="0" class="secondary" ${dis}>Force not reached</button>
+      <button data-ov="${sw}" data-val="" class="secondary" ${dis}>Cancel</button>`;
+  }
+
+  /* Wire the buttons inside one container only. */
+  function bind(root) {
+    for (const b of $$("[data-on]", root)) b.onclick = () => request(b.dataset.on, b.dataset.value !== "0");
+    for (const b of $$("[data-off]", root)) b.onclick = () => release(b.dataset.off);
+    for (const b of $$("[data-set]", root)) b.onclick = () => {
+      const value = Number($("[data-y4-input]", root).value);
+      if (Number.isFinite(value) && value >= 0 && value <= 100) request(b.dataset.set, value);
+      else { message = { text: "Y4 position must be 0-100 %", ok: false }; showMessage(); }
+    };
+    for (const b of $$("[data-ov]", root)) b.onclick = () => override(b.dataset.ov, b.dataset.val === "" ? null : b.dataset.val === "1");
+  }
+
   function build(enabled) {
     const c = cfg(), s = st();
     const commands = c.manual_commands || [];
     const pending = new Set(c.pending_identification || []);
     const rows = commands.map((cmd) => {
       const t = tag(cmd), channel = (c.output_channels || {})[cmd] || "—";
-      const actions = cmd === DRAIN
-        ? `<button data-on="${cmd}" data-value="0" class="danger" ${enabled ? "" : "disabled"}>STOP (inhibit)</button>
-           <button data-off="${cmd}" class="secondary" ${enabled ? "" : "disabled"}>Automatic</button>`
-        : cmd === "control_valve_percent"
-        ? `<input type="number" min="0" max="100" step="1" value="0" id="y4-input" ${enabled ? "" : "disabled"}> %
-           <button data-set="${cmd}" ${enabled ? "" : "disabled"}>Set</button>
-           <button data-off="${cmd}" class="secondary" ${enabled ? "" : "disabled"}>Close (release)</button>`
-        : `<button data-on="${cmd}" ${enabled ? "" : "disabled"}>${isValve(cmd) ? "Open" : "ON"}</button>
-           <button data-off="${cmd}" class="secondary" ${enabled ? "" : "disabled"}>${isValve(cmd) ? "Close" : "OFF"}</button>`;
+      const actions = actionButtons(cmd, enabled);
       return `<tr data-row="${cmd}"><td><b>${UI.esc(t.tag)}</b><br><span class="muted small">${UI.esc(t.name)}</span></td>
         <td class="nowrap">${UI.esc(channel)}${pending.has(channel) ? `<br><span class="note small">identity pending</span>` : ""}</td>
         <td data-cell="wanted"></td><td data-cell="commanded"></td><td data-cell="written"></td>
@@ -171,9 +196,7 @@ const MANUAL = (() => {
     const levels = Object.entries(roles).map(([role, sw]) => `<tr data-level="${sw}">
         <td><b>${UI.esc(tag(sw).tag)}</b><br><span class="muted small">${UI.esc(role.replace(/_/g, " "))}</span></td>
         <td data-cell="real"></td><td data-cell="effective"></td>
-        <td class="nowrap"><button data-ov="${sw}" data-val="1" class="secondary" ${enabled ? "" : "disabled"}>Force reached</button>
-          <button data-ov="${sw}" data-val="0" class="secondary" ${enabled ? "" : "disabled"}>Force not reached</button>
-          <button data-ov="${sw}" data-val="" class="secondary" ${enabled ? "" : "disabled"}>Cancel</button></td></tr>`).join("");
+        <td class="nowrap">${overrideButtons(sw, enabled)}</td></tr>`).join("");
     const [noteClass, noteText] = s ? outputNote(s) : ["held", "No controller data."];
     const reasons = blockers();
     $("#view-manual").innerHTML = `
@@ -195,14 +218,7 @@ const MANUAL = (() => {
       <p class="muted small">A real protective reading always wins: a reached high or overflow switch, a not-reached low switch.</p>
       <table class="manual"><thead><tr><th>Switch</th><th>Real reading</th><th>Used by the logic</th><th>Override</th></tr></thead>
         <tbody>${levels}</tbody></table>`;
-    for (const b of $$("[data-on]")) b.onclick = () => request(b.dataset.on, b.dataset.value !== "0");
-    for (const b of $$("[data-off]")) b.onclick = () => release(b.dataset.off);
-    for (const b of $$("[data-set]")) b.onclick = () => {
-      const value = Number($("#y4-input").value);
-      if (Number.isFinite(value) && value >= 0 && value <= 100) request(b.dataset.set, value);
-      else { message = { text: "Y4 position must be 0-100 %", ok: false }; showMessage(); }
-    };
-    for (const b of $$("[data-ov]")) b.onclick = () => override(b.dataset.ov, b.dataset.val === "" ? null : b.dataset.val === "1");
+    bind($("#view-manual"));
     $("#manual-all-off").onclick = allOff;
     $("#manual-valve-test").onclick = async () => { await toggleValveTest(); structure = ""; render(); };
     showMessage();
@@ -236,7 +252,58 @@ const MANUAL = (() => {
     }
   }
 
+  /* Detail panel: manual buttons for the clicked part. Shown only while the
+     controller reports MANUAL with current data; the same checks as the tab apply. */
+  let detailKey = "";
+  function renderDetail(id) {
+    const box = document.getElementById("card-manual");
+    if (!box) return;
+    const s = st(), c = cfg();
+    const isCmd = !!id && (c.manual_commands || []).includes(id);
+    const isSwitch = !!id && Object.values(c.level_roles || {}).includes(id);
+    if (!id || !s || !isLive() || s.mode !== "MANUAL" || (!isCmd && !isSwitch)) {
+      box.hidden = true; box.innerHTML = ""; detailKey = ""; return;
+    }
+    box.hidden = false;
+    const reasons = blockers(), enabled = reasons.length === 0;
+    const key = JSON.stringify([id, enabled, reasons, s.outputs_enabled, s.data_source]);
+    if (key !== detailKey) {
+      detailKey = key;
+      const [noteClass, noteText] = outputNote(s);
+      box.innerHTML = `<h3>Manual control</h3>
+        <p class="output-note output-${noteClass}">${UI.esc(noteText)}</p>
+        ${reasons.length ? `<ul class="blockers">${reasons.map((r) => `<li>${UI.esc(r)}</li>`).join("")}</ul>` : ""}
+        ${isCmd ? `<table class="kv"><tr><th>Your request</th><td data-dm="wanted"></td></tr>
+            <tr><th>Commanded</th><td data-dm="commanded"></td></tr>
+            <tr><th>Interlock / alarm</th><td data-dm="note"></td></tr></table>
+          <div class="detail-actions">${actionButtons(id, enabled)}</div>`
+          : `<table class="kv"><tr><th>Real reading</th><td data-dm="real"></td></tr>
+            <tr><th>Used by the logic</th><td data-dm="effective"></td></tr></table>
+          <div class="detail-actions">${overrideButtons(id, enabled)}</div>`}
+        <p class="muted small">Requests are renewed while this page is open. The manual tab shows all outputs.</p>
+        <p id="detail-manual-message"></p>`;
+      bind(box);
+      showMessage();
+    }
+    const cell = (k) => $(`[data-dm="${k}"]`, box);
+    if (isCmd) {
+      const w = wanted[id];
+      cell("wanted").textContent = w ? wantedText(id, w.value) : "—";
+      cell("commanded").textContent = fmt(id, s.commanded[id]);
+      const notes = (s.arbitration_notes || []).filter((n) => n.output === id).map((n) => n.message);
+      const alarms = (s.alarms || []).filter((a) => (a.equipment || []).includes(id)).map((a) => a.code);
+      cell("note").textContent = [...notes, ...alarms].join(" · ") || "—";
+    } else {
+      const lv = ((s.signals && s.signals.levels) || {})[id];
+      const real = id in (s.override_actual || {}) ? s.override_actual[id] : lv && lv.valid ? lv.reached : null;
+      const word2 = (v) => (v === true ? "Reached" : v === false ? "Not reached" : "Unknown");
+      cell("real").textContent = word2(real);
+      cell("effective").textContent = word2(lv && lv.valid ? lv.reached : null) + ((s.overrides || []).includes(id) ? " (override)" : "");
+    }
+  }
+
   function render() {
+    if (APP.selected) renderDetail(APP.selected);
     if (APP.tab !== "manual") return;
     const s = st();
     const enabled = blockers().length === 0;
@@ -287,5 +354,5 @@ const MANUAL = (() => {
     setInterval(tick, 1000);
   }
 
-  return { init, render, send, refreshSession };
+  return { init, render, renderDetail, send, refreshSession };
 })();

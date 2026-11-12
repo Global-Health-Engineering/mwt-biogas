@@ -205,6 +205,7 @@ function renderCard() {
   const st = APP.view && APP.view.status;
   const card = $("#card");
   if (APP.selected) return renderDetail();
+  MANUAL.renderDetail(null);
   if (!st) { card.innerHTML = `<h2>Waiting for controller data</h2>`; return; }
   const live = isLive();
   if (APP.tab === "pasteurizer") {
@@ -231,7 +232,7 @@ function renderCard() {
       return `Command ${word(id, st.commanded[id])}${req !== undefined && req !== st.commanded[id] ? ` (requested ${word(id, req)})` : ""}` +
         (isShadow(st) ? `<br><span class="note small">${NOT_WRITTEN}</span>` : "");
     };
-    card.innerHTML = `<h2>EDiBl</h2>
+    card.innerHTML = `<h2>EDB</h2>
       <table class="kv">
         <tr><th colspan="2">Line 1 (Tank #1)</th></tr>
         <tr><td>EDB-PU-01 pump</td><td>${cmd("transfer_pump_1")}</td></tr>
@@ -297,6 +298,7 @@ function renderDetail() {
     <div class="flags">${provisional([e.id])}</div>
     ${isLive() ? "" : `<p class="note">Data is stale: values are the last received.</p>`}`;
   $("#close-detail").onclick = () => { APP.selected = null; renderCard(); };
+  MANUAL.renderDetail(e.id);   // manual buttons for this part, only in MANUAL
 }
 
 /* Alarms ------------------------------------------------------------------- */

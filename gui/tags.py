@@ -62,7 +62,7 @@ EQUIPMENT = [
        "pasteurizer", "command"),
     _e("burner", "GPST-GB-01", "Biogas water heater (flame not monitored)", "pasteurizer",
        "not_monitored"),
-    _e("manual_GPST-VL-07", "GPST-VL-07", "Manual bypass valve", "pasteurizer", "manual"),
+    _e("manual_GPST-VL-07", "GPST-VL-07", "Manual drain valve", "pasteurizer", "manual"),
     _e("tank_PST-TK-01", "PST-TK-01", "1000 L sludge buffer tank", "pasteurizer", "static"),
     _e("hx_GPST-HX-01", "GPST-HX-01", "Heat recovery exchanger", "pasteurizer", "static"),
     _e("hx_PST-HX-02", "PST-HX-02", "Pasteurizer vessel", "pasteurizer", "static"),
@@ -85,9 +85,8 @@ BY_ID = {e["id"]: e for e in EQUIPMENT}
 # Pipe colours as in GUI_V2 (fluid identity, never measured flow).
 LEGEND = {
     "edibl": [
-        {"colour": "#B20000", "label": "Effluent, tanks to transfer pumps"},
-        {"colour": "#C73500", "label": "Effluent, pumps to PST-TK-01"},
-        {"colour": "#b46504", "label": "Filter effluent (drain pump)"},
+        {"colour": "#B20000", "label": "Effluent"},
+        {"colour": "#2f7fd1", "label": "Water (manhole drain pump)"},
     ],
     "pasteurizer": [
         {"colour": "#FF0000", "label": "Hot water"},

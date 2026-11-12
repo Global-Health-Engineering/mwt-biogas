@@ -175,3 +175,18 @@ table.manual th { color: var(--muted); font-weight: 500; }
 table.manual input[type=number] { width: 64px; }
 .row-active { background: rgba(51, 209, 122, .08); box-shadow: inset 4px 0 0 var(--on); }
 @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
+.heater-rod { fill: var(--panel-2); }
+.card-manual { margin-top: 12px; }
+.detail-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 8px 0; }
+.detail-actions input { width: 70px; }
+/* Manual ON/OFF as a two-part toggle: the selected side is filled. */
+.toggle { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; vertical-align: middle; }
+.toggle .tg { background: var(--panel-2); color: var(--muted); border: 0; border-radius: 0; padding: 6px 14px; font-weight: 600; }
+.toggle .tg + .tg { border-left: 1px solid var(--line); }
+.toggle .tg:not(:disabled):hover { color: var(--text); background: #26303a; }
+.toggle .tg-on.selected { background: var(--on); color: #06210f; }
+.toggle .tg-stop.selected { background: #b3261e; color: #fff; }
+.toggle .tg-off.selected { background: #3a4552; color: var(--text); }
+.toggle .tg.pending { animation: tg-pulse 0.8s ease-in-out infinite alternate; }
+.toggle .tg.held { background: var(--warn) !important; color: #2a1d00 !important; }
+@keyframes tg-pulse { from { opacity: 1; } to { opacity: .45; } }
