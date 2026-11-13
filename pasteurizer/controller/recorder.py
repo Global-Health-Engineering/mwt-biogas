@@ -149,7 +149,8 @@ def process_sample(inputs, status) -> dict:
         "stop_hold": status.stop_hold,
         "acquisition": {"valid": inputs.acquisition_ok,
                         "age_s": round(inputs.acquisition_age_s, 3)},
-        "temperatures": {name: {"celsius": r.celsius, "valid": r.valid}
+        "temperatures": {name: {"celsius": r.celsius, "valid": r.valid,
+                                 "offset_c": r.offset_c}
                          for name, r in signals.temperatures.items()},
         "flows": {name: {"l_min": f.flow_lpm, "valid": f.valid, "calibrated": f.calibrated}
                   for name, f in signals.flows.items()},

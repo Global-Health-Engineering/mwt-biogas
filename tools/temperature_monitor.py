@@ -21,6 +21,15 @@ def main():
     with mapping_path.open() as file:
         mapping = json.load(file)
 
+    with (PROJECT_ROOT / "config" / "temperature_settings.json").open() as file:
+        sensor_settings = json.load(file)["sensors"]
+
+    # Calibration offsets from temperature_settings.json; 0.0 if not set.
+    offsets = {
+        name: float(sensor_settings.get(name, {}).get("offset_c", 0.0))
+        for name in mapping["temperatures"]
+    }
+
     rpi = revpimodio2.RevPiModIO(
         autorefresh=False,
         monitoring=True,
@@ -50,6 +59,7 @@ def main():
                 reading = process_temperature(
                     value_io.value,
                     status_io.value,
+                    offset_c=offsets[name],
                 )
 
                 if reading.valid:
@@ -59,7 +69,8 @@ def main():
 
                 print(
                     f"{name:<10} {message}"
-                    f"  [raw={reading.raw}, status={reading.status}]",
+                    f"  [raw={reading.raw}, status={reading.status}, "
+                    f"offset={reading.offset_c:+.2f} °C]",
                     flush=True,
                 )
 

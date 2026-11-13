@@ -43,6 +43,8 @@ def config_info(config) -> dict:
         "settings_validated": control.settings_validated,
         "model_control_enabled": control.model_control_enabled,
         "temperature_ranges_validated": config.temperature_ranges_validated,
+        "temperature_calibration_confirmed":
+            config.temperature_calibration_confirmed,
         "physical_assignments_verified": bool(
             config.roles.get("physical_assignments_verified", False)),
         "flow_calibration_confirmed": {

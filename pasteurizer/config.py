@@ -66,6 +66,7 @@ class FlowSensorSettings:
 class TemperatureSensorSettings:
     plausible_min_c: float | None
     plausible_max_c: float | None
+    offset_c: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -117,6 +118,7 @@ class PlantConfig:
     flows: dict[str, FlowSensorSettings]
     temperatures: dict[str, TemperatureSensorSettings]
     temperature_ranges_validated: bool
+    temperature_calibration_confirmed: bool
     valve: ValveSettings
     startup: StartupSettings
     drain: DrainSettings
@@ -267,20 +269,29 @@ def _flows(data, where):
 
 
 def _temperatures(data, where):
-    _exact_keys(data, ("ranges_validated", "sensors"), where)
+    _exact_keys(data, ("ranges_validated", "calibration_confirmed", "sensors"),
+                where)
     result = {}
     for name, options in _object(data["sensors"], f"{where}.sensors").items():
         here = f"{where}.sensors.{name}"
-        _exact_keys(options, ("plausible_min_c", "plausible_max_c"), here)
+        _exact_keys(options, ("plausible_min_c", "plausible_max_c", "offset_c"),
+                    here)
         low = _number(options["plausible_min_c"], f"{here}.plausible_min_c",
                       minimum=-200.0, maximum=850.0, allow_none=True)
         high = _number(options["plausible_max_c"], f"{here}.plausible_max_c",
                        minimum=-200.0, maximum=850.0, allow_none=True)
         if low is not None and high is not None and low >= high:
             raise ConfigError(f"{here}: plausible_min_c must be below plausible_max_c")
-        result[name] = TemperatureSensorSettings(low, high)
+        # Calibration offset added to the converted reading. Limited to a few
+        # degrees: a larger correction points to a wiring or sensor fault,
+        # not something to calibrate away.
+        offset = _number(options["offset_c"], f"{here}.offset_c",
+                         minimum=-5.0, maximum=5.0)
+        result[name] = TemperatureSensorSettings(low, high, offset)
     validated = _boolean(data["ranges_validated"], f"{where}.ranges_validated")
-    return result, validated
+    calibrated = _boolean(data["calibration_confirmed"],
+                          f"{where}.calibration_confirmed")
+    return result, validated, calibrated
 
 
 def _valve(data, where):
@@ -618,7 +629,8 @@ def load_config(directory=None) -> PlantConfig:
         ).items()
     }
 
-    temperatures, temperature_ranges_validated = _temperatures(
+    (temperatures, temperature_ranges_validated,
+     temperature_calibration_confirmed) = _temperatures(
         documents["temperature_settings.json"], "temperature_settings.json"
     )
 
@@ -644,6 +656,7 @@ def load_config(directory=None) -> PlantConfig:
     return PlantConfig(
         directory=directory,
         temperature_ranges_validated=temperature_ranges_validated,
+        temperature_calibration_confirmed=temperature_calibration_confirmed,
         roles=copy.deepcopy(roles),
         treatment=copy.deepcopy(documents["treatment_settings.json"]),
         config_hash=digest.hexdigest(),

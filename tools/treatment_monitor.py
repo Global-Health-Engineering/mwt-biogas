@@ -26,6 +26,7 @@ def main():
     settings = load_config("treatment_settings.json")
     flow_settings = load_config("flow_settings.json")
     roles = load_config("equipment_roles.json")
+    temperature_settings = load_config("temperature_settings.json")["sensors"]
     sensors = settings["sensors"]
 
     flow_name = sensors["effluent_flow"]
@@ -44,12 +45,15 @@ def main():
             "effluent_outlet_temperature",
         )
         channels = {}
+        offsets = {}
         for key in sensor_keys:
             definition = mapping["temperatures"][sensors[key]]
             channels[key] = (
                 rpi.io[definition["value"]],
                 rpi.io[definition["status"]],
             )
+            offsets[key] = float(
+                temperature_settings.get(sensors[key], {}).get("offset_c", 0.0))
 
         print("Read-only preliminary hydraulics. Ctrl+C to stop.")
         print("E. coli reduction: UNAVAILABLE — thermal/kinetic models pending.")
@@ -70,7 +74,8 @@ def main():
 
             flow = processor.update(counter.value, time.monotonic())
             temperatures = {
-                key: process_temperature(value.value, status_io.value)
+                key: process_temperature(value.value, status_io.value,
+                                         offset_c=offsets[key])
                 for key, (value, status_io) in channels.items()
             }
 

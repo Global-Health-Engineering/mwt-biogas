@@ -284,6 +284,7 @@ class SignalProcessor:
                 reading["status"],
                 limits.plausible_min_c if limits else None,
                 limits.plausible_max_c if limits else None,
+                limits.offset_c if limits else 0.0,
             )
         return result
 
