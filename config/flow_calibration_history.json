@@ -24,5 +24,18 @@
     "source_export": "exports/flow_calibration/flow_sensor_2_calibration_20261112T130131Z.csv",
     "backup_file": "flow_settings.json.20261112T130149Z.bak",
     "software_commit": "22dbe18+uncommitted"
+  },
+  {
+    "saved_at_utc": "2026-11-14T12:24:50.554Z",
+    "sensor_id": "flow_sensor_3",
+    "previous_pulses_per_litre": null,
+    "previous_calibration_confirmed": false,
+    "new_pulses_per_litre": 4928.61,
+    "calibration_confirmed_set_to": false,
+    "accepted_runs": 16,
+    "max_abs_deviation_percent": 47.73454287407041,
+    "source_export": "exports/flow_calibration/flow_sensor_3_calibration_20261114T122432Z.csv",
+    "backup_file": "flow_settings.json.20261114T122450Z.bak",
+    "software_commit": "62432a6+uncommitted"
   }
 ]

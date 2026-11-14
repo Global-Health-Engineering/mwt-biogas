@@ -12,8 +12,8 @@
     "max_sample_gap_seconds": 3.0
   },
   "flow_sensor_3": {
-    "pulses_per_litre": null,
-    "calibration_confirmed": false,
+    "pulses_per_litre": 6000,
+    "calibration_confirmed": true,
     "max_pulse_rate_hz": null,
     "max_sample_gap_seconds": 3.0
   }
