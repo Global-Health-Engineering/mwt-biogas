@@ -11,9 +11,13 @@ Rules, applied in this order every cycle (settings in arbiter_settings.json):
    preheat_exclusion.excluded_outputs is removed (transfer pumps, 1 kW
    heater, heating circulation, manhole drain, compressor). Overflow valves
    Y1/Y2 are not affected.
-4. Energy: each heater has its own battery permission
-   (energy.min_battery_percent), checked once battery_level_available is
-   true. Losing the 1 kW permission switches off only the 1 kW.
+4. Energy (solar): the electric heaters (1 kW, 3 kW, both) run only with
+   the solar permission from pasteurizer/energy.py (surplus, SOC, timers,
+   inverter data), when energy.solar_permission_enabled is true. The
+   permission is checked for exactly the heaters still requested after rule
+   3; when both are requested and only one may run, the larger permitted one
+   stays. Losing the 1 kW permission switches off only the 1 kW. The biogas
+   heating (heating_circulation) is not affected.
 5. Switching pause (break-before-make): the 3 kW heater may only switch on
    when every excluded output has been off in the *written* frames for
    switching_pause_seconds; excluded outputs may only switch on when the
@@ -53,6 +57,7 @@ from pasteurizer.process_state import HEAT_UP_STATES, TREATMENT_STATES, ProcessS
 
 
 ISOLATION_COMMAND = "pasteurizer_isolation_open"
+ENERGY_HEATERS = ("heater_1kw", "heater_3kw")
 COMPRESSOR_COMMAND = "biogas_compressor"
 FAN_COMMAND = "cabinet_fan_disabled"
 
@@ -187,7 +192,7 @@ class OutputArbiter:
         indicators: IndicatorInputs,
         now: float,
         *,
-        battery_percent: float | None = None,
+        energy=None,
         plant_safe: bool = False,
     ) -> ArbitrationResult:
         if not isinstance(requested, OutputCommands):
@@ -242,19 +247,9 @@ class OutputArbiter:
                 block(name, "PREHEAT_EXCLUSION",
                       f"Not allowed while {heater} is requested")
 
-        # 4. Energy ------------------------------------------------------
-        if settings.battery_level_available:
-            for name, minimum in settings.min_battery_percent.items():
-                if (
-                    not isinstance(battery_percent, (int, float))
-                    or isinstance(battery_percent, bool)
-                    or not math.isfinite(battery_percent)
-                ):
-                    block(name, "ENERGY_UNKNOWN", "Battery level unavailable")
-                elif battery_percent < minimum:
-                    block(name, "ENERGY_LOW",
-                          f"Battery {battery_percent:.0f} % below "
-                          f"{minimum:.0f} % for {name}")
+        # 4. Energy (solar permission) -----------------------------------
+        if settings.energy.solar_permission_enabled:
+            self._energy_rule(out, energy, block)
 
         # 5. Switching pause --------------------------------------------
         pause = settings.switching_pause_seconds
@@ -293,6 +288,33 @@ class OutputArbiter:
 
         commands = OutputCommands(**out)
         return ArbitrationResult(commands, requested, tuple(notes))
+
+    @staticmethod
+    def _energy_rule(out, energy, block):
+        """energy: EnergyStatus of this cycle (None: not evaluated -> no heating)."""
+        heaters = [name for name in ENERGY_HEATERS if out[name]]
+        if not heaters:
+            return
+        if energy is None:
+            for name in heaters:
+                block(name, "ENERGY_UNKNOWN", "Solar permission not evaluated")
+            return
+        if energy.permitted(heaters):
+            return
+        if len(heaters) > 1:
+            keep = next((name for name in ("heater_3kw", "heater_1kw")
+                         if energy.permitted([name])), None)
+            reason = energy.reason(heaters)
+            for name in heaters:
+                if name != keep:
+                    block(name, "ENERGY_SOLAR", f"1 kW + 3 kW not permitted: {reason}")
+            return
+        mode = energy.modes[heaters[0]]
+        reason = mode.reason
+        if mode.timer_s is not None:
+            reason = f"{reason} {mode.timer_s:.0f} s"
+        block(heaters[0], "ENERGY_SOLAR", reason,
+              mode.timer_s if mode.state == "STARTING" else None)
 
     @staticmethod
     def safe_frame() -> OutputCommands:

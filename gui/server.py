@@ -9,6 +9,8 @@
     /api/trend        trend series (decimated, gaps, runs)
     /api/runs         controller runs
     /api/export.csv   filtered events as CSV
+    /api/solar        solar and electric-heater permission from the controller's
+                      snapshot (the controller is the only Modbus client)
     /api/session      who is logged in (GET)
     POST /api/login   {"name", "password"} -> session cookie
     POST /api/logout
@@ -46,6 +48,32 @@ COOKIE = "mwt_session"
 CSRF_HEADER = ("X-Requested-With", "mwt-gui")
 MAX_BODY = 4096
 FAILED_LOGIN_DELAY_S = 1.0
+
+
+ENERGY_HEATERS = ("heater_1kw", "heater_3kw")
+
+
+def solar_view(link) -> dict:
+    """The Solar tab's data: inverters, energy permission and the electric
+    heaters, all from the controller snapshot (never read here)."""
+    status = link.get("status") or {}
+    energy = status.get("energy") or {}
+    written = status.get("written") or {}
+    heaters = {}
+    for name in ENERGY_HEATERS:
+        heaters[name] = {
+            "requested": (status.get("requested") or {}).get(name),
+            "commanded": (status.get("commanded") or {}).get(name),
+            "written": written.get(name) if status.get("written") is not None else None,
+            "notes": [n for n in status.get("arbitration_notes") or [] if n.get("output") == name],
+        }
+    return {
+        "controller": {key: link.get(key) for key in ("state", "age_s", "responding", "error")},
+        "mode": status.get("mode"), "plant_state": status.get("state"),
+        "solar": energy.get("solar"), "energy": energy.get("status"),
+        "settings": energy.get("settings"), "heaters": heaters,
+        "gui_time": time.time(),
+    }
 
 
 class GuiServer:
@@ -123,6 +151,8 @@ class GuiServer:
                         view = gui.link.view()
                         view["gui_time"] = time.time()
                         return self._json(200, view)
+                    if url.path == "/api/solar":
+                        return self._json(200, solar_view(gui.link.view()))
                     if url.path == "/api/meta":
                         return self._json(200, {"equipment": EQUIPMENT, "legend": LEGEND,
                                                 "config": gui.link.view()["config"]})

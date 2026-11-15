@@ -7,3 +7,4 @@
 revpimodio2   # hardware access (pasteurizer/hardware.py, monitors)
 scipy         # treatment_model root finding
 iapws         # treatment_model water properties
+pymodbus      # controller: Deye inverters (pasteurizer/solar.py); without it the electric heaters get no solar permission

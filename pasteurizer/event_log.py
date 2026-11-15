@@ -3,7 +3,8 @@
 Every record carries its data source (LIVE plant I/O or SIMULATED), its
 clock source (SYSTEM clock or SIMULATED time), UTC time, the clock-sync
 state, monotonic time, boot ID and a sequence number (shared by events and
-samples). Control timing never
+samples). Events written during a scan cycle also carry its cycle number
+(`data.cycle`), so the GUI can show which events belong together. Control timing never
 uses the wall clock. A wall-clock jump against monotonic time is recorded as
 CLOCK_CORRECTION (old time, new time, size); a change of the sync state as
 CLOCK_SYNC_CHANGED.
@@ -57,6 +58,8 @@ class EventLog:
         system_time = isinstance(self.clock, MonotonicClock) and wall_clock is time.time
         self.clock_source = "SYSTEM" if system_time else "SIMULATED"
         self.recovery_pending: list[dict] = []
+        # Set by the controller for the duration of one scan cycle; None between cycles.
+        self.cycle: int | None = None
 
     # Public ------------------------------------------------------------------
     def record(self, kind: str, **data) -> dict:
@@ -160,6 +163,8 @@ class EventLog:
 
     def _stamp(self, table, kind, data, mono, wall, sync) -> dict:
         self.sequence += 1
+        if table == "events" and self.cycle is not None and "cycle" not in data:
+            data = {**data, "cycle": self.cycle}
         record = {
             "table": table,
             "source": self.data_source,

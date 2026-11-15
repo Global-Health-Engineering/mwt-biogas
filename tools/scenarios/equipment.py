@@ -1,4 +1,4 @@
-"""Transfer pump, drain, overflow and battery scenarios."""
+"""Transfer pump, drain, overflow and solar permission scenarios."""
 
 from pasteurizer.modes import Mode
 from scenarios.harness import (
@@ -105,14 +105,13 @@ def s27():
     assert not sim.out("transfer_pump_1"), "Level 2 needs a GUI reset"
 
 
-@scenario(41, "1 kW battery permission lost: only the 1 kW switches off")
+@scenario(41, "1 kW solar permission lost (SOC <= 20 %): only the 1 kW switches off, biogas heating stays")
 def s41():
-    sim = Sim(params=FAST, bath=78.0, battery=50.0,
-              arbiter={"energy.battery_level_available": True,
-                       "energy.min_battery_percent.heater_3kw": 60.0,
-                       "energy.min_battery_percent.heater_1kw": 40.0})
+    sim = Sim(params=FAST, bath=78.0)
     sim.run(15)
     assert sim.out("heater_1kw") and sim.out("heating_circulation")
-    sim.battery = 30.0
+    sim.solar.soc_percent = 20.0
     sim.run(0.4)
+    notes = [n for n in sim.status.arbitration_notes if n["output"] == "heater_1kw"]
+    assert notes and notes[0]["rule"] == "ENERGY_SOLAR" and "SOC 20 %" in notes[0]["message"]
     assert not sim.out("heater_1kw") and sim.out("heating_circulation")

@@ -13,11 +13,18 @@
     "switching_pause_seconds": 10.0
   },
   "energy": {
-    "battery_level_available": false,
-    "min_battery_percent": {
-      "heater_3kw": null,
-      "heater_1kw": null
-    }
+    "solar_permission_enabled": true,
+    "heater_power_w": {
+      "heater_1kw": 1000.0,
+      "heater_3kw": 3000.0
+    },
+    "start_surplus_fraction": 0.20,
+    "stop_surplus_fraction": 0.15,
+    "start_delay_s": 120.0,
+    "stop_delay_s": 120.0,
+    "soc_start_min_percent": 30.0,
+    "soc_stop_at_percent": 20.0,
+    "communication_timeout_s": 60.0
   },
   "isolation_valve": {
     "open_before_control_valve_seconds": 10.0

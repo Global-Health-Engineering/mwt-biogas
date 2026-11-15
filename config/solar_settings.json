@@ -1,0 +1,13 @@
+{
+  "_comment": "Deye inverters, read by the controller over Modbus TCP (read-only). Part of the controller configuration and its hash. Heater permission rules: arbiter_settings.json energy.",
+  "enabled": true,
+  "poll_s": 5.0,
+  "timeout_s": 3.0,
+  "stale_after_s": 15.0,
+  "soc_mismatch_pct": 2,
+  "battery_charge_sign_verified": false,
+  "inverters": [
+    {"id": "inverter_1", "name": "Inverter 1", "host": "192.168.1.158", "port": 502, "device_id": 1},
+    {"id": "inverter_2", "name": "Inverter 2", "host": "192.168.1.162", "port": 502, "device_id": 1}
+  ]
+}

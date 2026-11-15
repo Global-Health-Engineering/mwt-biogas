@@ -1,7 +1,13 @@
 """Writes cycle events and periodic samples to the event log (spec section 13).
 
 Events (on change only):
-  OUTPUT_REQUESTED   requested commands changed, with the arbiter's notes
+  LEVEL_CHANGED, SENSOR_VALIDITY, FLOW_STARTED, FLOW_STOPPED
+                     what the inputs did (signal_watch.py), logged first
+  OUTPUT_REQUESTED   requested commands changed, with the arbiter's notes,
+                     each changed command's reason and blocking protections,
+                     the reason it had just before (`previous`: e.g. what kept a
+                     pump off until now), and the signal events of the same
+                     cycle (`same_cycle_signals`)
   OUTPUT_WRITTEN     a successfully written command changed
   OUTPUT_NOT_WRITTEN outputs disabled (shadow run): the command changed but
                      was not written, reason OUTPUTS_DISABLED
@@ -17,14 +23,19 @@ result, plant state, requested and written commands, lights and alarms.
 
 from dataclasses import asdict
 
+from pasteurizer.controller.signal_watch import SignalWatch
 from pasteurizer.shadow_outputs import NOT_WRITTEN_REASON
 
 LIGHTS = ("light_green", "light_yellow", "light_red")
 
 
 class CycleRecorder:
-    def __init__(self, log, faults, logging_settings, *, start_time, outputs_enabled=True):
+    def __init__(self, log, faults, logging_settings, *, start_time, outputs_enabled=True,
+                 config=None):
         self.log = log
+        self.watch = SignalWatch(config, logging_settings) if config is not None else None
+        self._cycle_signals = []
+        self._last_explanations = {}
         self.outputs_enabled = outputs_enabled
         self.faults = faults
         self.interval = logging_settings.periodic_interval_s
@@ -37,17 +48,48 @@ class CycleRecorder:
         self._last_event = 0
         self._next_sample = start_time
 
+    # Signals ---------------------------------------------------------------
+    def signals(self, inputs):
+        """Signal events of this cycle; called right after the input stage."""
+        self._cycle_signals = []
+        if self.watch is None:
+            return
+        try:
+            events = self.watch.update(inputs)
+        except Exception as error:      # logging must never stop the control scan
+            self.log.record("SIGNAL_WATCH_ERROR", error=str(error))
+            return
+        for kind, data in events:
+            self.log.record(kind, **data)
+            if not data.get("initial"):      # first readings of a run cause nothing
+                self._cycle_signals.append({"kind": kind, "sensor": data["sensor"]})
+
     # Outputs ---------------------------------------------------------------
-    def requested(self, status):
+    def requested(self, status, explanations=None):
         """Requested (pre-arbiter) commands, recorded when they change."""
         requested = {k: v for k, v in status.requested.items() if k not in LIGHTS}
         previous = self._last_requested or {}
         changes = {k: v for k, v in requested.items()
                    if self._last_requested is None or previous.get(k) != v}
         if changes:
+            extra = {}
+            if explanations:
+                extra["reasons"] = {}
+                for k in changes:
+                    if k not in explanations:
+                        continue
+                    entry = dict(explanations[k])
+                    before = self._last_explanations.get(k)
+                    if before is not None and before != explanations[k]:
+                        entry["previous"] = before
+                    extra["reasons"][k] = entry
+            if self._cycle_signals:
+                extra["same_cycle_signals"] = list(self._cycle_signals)
             self.log.record("OUTPUT_REQUESTED", changes=changes,
-                            arbitration_notes=status.arbitration_notes)
+                            arbitration_notes=status.arbitration_notes, **extra)
         self._last_requested = requested
+        if explanations:
+            self._last_explanations = explanations
 
     def write_result(self, frame, ok: bool, indicators, plant_safe: bool):
         if ok:

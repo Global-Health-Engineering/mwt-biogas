@@ -56,7 +56,7 @@ level overrides), `persistence.py` (latched faults, STOP hold, retry
 allowance), `event_log.py` (UTC + clock-sync + monotonic + boot ID +
 sequence; queues records for the historian), `clock_sync.py` (kernel NTP
 state), `historian/` (see below), `alarm_catalogue.py` (equipment and consequence per alarm, for the GUI), `publisher.py` (read-only status publisher on localhost, see "GUI"), `command_server.py` (GUI commands into the scan, localhost + token), `run_lock.py` (one controller on the hardware), `watchdog.py` (heartbeat; in-process software watchdog), `systemd_notify.py` (READY/WATCHDOG/STOPPING to systemd), `shadow_outputs.py` (output writer for shadow runs: keeps commands, writes nothing), `simulated_io.py` (plant
-simulator with PRETEND parameters).
+simulator with PRETEND parameters), `solar.py` (Deye inverters over Modbus TCP, read-only), `energy.py` (solar permission for the electric heaters), `simulated_solar.py` (simulated inverter pair).
 
 `controller/` holds one responsibility per module:
 
@@ -137,6 +137,21 @@ local SQLite database, by default `logs/historian.sqlite`.
   CONTROLLER_STOP and flushes the historian within a timeout; flushing can
   never delay the safe frame.
 - Databases and CSV exports are generated files and are not in Git.
+- Signal events (`pasteurizer/controller/signal_watch.py`, logging only, no
+  effect on control) show what the inputs did, on change only:
+  LEVEL_CHANGED (debounced switch, actual reading; overrides noted),
+  SENSOR_VALIDITY (any sensor invalid / valid again, in every plant state,
+  after `logging.signal_validity_hold_s`; not per sensor during an
+  acquisition loss), FLOW_STARTED / FLOW_STOPPED (flow above
+  `flow_activity_min_l_min`, or `flow_activity_min_pulse_hz` without a
+  K-factor, for `flow_activity_hold_s`; the stop records duration, litres,
+  average and peak flow and the cause).
+- OUTPUT_REQUESTED records each changed command's reason and blocking
+  protections (`reasons`), the reason it had just before (`previous`, e.g.
+  what kept a pump off), and the signal events of the same scan
+  (`same_cycle_signals`). Every event written during a scan carries its
+  cycle number (`data.cycle`); the log window highlights all events of a
+  scan when one is clicked, and its "Operator" view hides signal events.
 
 | Module | Responsibility |
 |---|---|
@@ -203,7 +218,58 @@ Desk test with the simulator (Windows; `python3` on Linux):
 | `auth.py` | Users file, password hashes, sessions, lockout |
 | `history_api.py` | Event descriptions, paging, trends, CSV export (max 100 000 rows) |
 | `tags.py` | Drawing tags, names, kinds (what the GUI may claim), pipe legend |
-| `static/` | Drawings, alarms, trends, log window, manual panel (`manual.js`) |
+| `static/` | Drawings, alarms, trends, log window, manual panel (`manual.js`), Solar tab (`solar.js`) |
+
+### Solar permission for the electric heaters (Deye inverters)
+
+Two Deye 5 kW hybrid inverters run in parallel on one battery. Their WiFi
+dataloggers answer Modbus TCP on port 502 (device ID 1). **The controller is
+the only Modbus client** (`pasteurizer/solar.py`, one background thread per
+inverter, every 5 s; the scan never waits for Modbus). The GUI shows the data
+from the controller's status (Solar tab, `GET /api/solar`).
+
+    controller --Modbus TCP, read-only--> 192.168.1.158:502, 192.168.1.162:502
+    controller: energy.py -> arbiter rule 4 -> heater_1kw / heater_3kw
+    GUI: /api/solar <- controller status (inverters, permission, reasons)
+
+Rules (`pasteurizer/energy.py`, settings in `arbiter_settings.json` `energy`):
+
+| | 1 kW | 3 kW | both (4 kW) |
+|---|---|---|---|
+| Start: surplus >= 20 % of power, held 120 s | 200 W | 600 W | 800 W |
+| Stop: surplus < 15 % of power for 120 s | 150 W | 450 W | 600 W |
+
+- **Surplus** = combined PV - other loads, other loads = combined load - rated
+  power of the heaters on in the last written frame (no double counting; the
+  measured load already contains them). Limit: a heater cut out by its own
+  thermostat is still subtracted, so the surplus is then overestimated.
+- **SOC** (lower of the two inverters): start only at >= 30 %, stop at once at
+  <= 20 %; between them a running permission continues.
+- **Inverter data**: both inverters must be current with plausible values. No
+  data: no new permission; a running permission ends after
+  `communication_timeout_s` (60 s). After data returns, the 120 s start delay
+  runs again.
+- **Arbiter rule 4** removes heater requests without permission (note
+  `ENERGY_SOLAR` with the reason, `ENERGY_UNKNOWN` without an evaluation). It
+  never creates a request; temperature, state-machine and safety interlocks
+  are unchanged. When both heaters are requested and only one may run, the
+  larger permitted one stays. Today they never run together: the preheat
+  exclusion (rule 3) removes the 1 kW while the 3 kW is requested.
+- **The biogas heating** (`heating_circulation`) is never gated.
+- **Applies in AUTO and MANUAL.** `energy.solar_permission_enabled: false`
+  switches the rule off (e.g. commissioning at night).
+- **Preheat timeout** (`control_settings.json` `preheat.max_duration_s`, now
+  5 h) counts only the time the 3 kW was written on: waiting for the sun
+  never trips the plant.
+- Event log: `ENERGY_PERMISSION` on every change (mode, reason, surplus, SOC).
+- Battery power: positive = discharging (validated with the 1 kW heater
+  test); negative is shown as charging, "sign unverified", until
+  `battery_charge_sign_verified` in `solar_settings.json` is `true`.
+- Without pymodbus (or with `solar_settings.json` `enabled: false`) the
+  electric heaters get no permission; the controller runs normally.
+- Simulation (`tools/run_simulation.py`, scenarios) uses
+  `pasteurizer/simulated_solar.py` (sunny by default; its load includes the
+  heaters that are on).
 
 ## Controller on the RevPi (production: outputs enabled)
 
@@ -337,6 +403,8 @@ What is running on the RevPi (read-only checks):
     python3 tools/control_scenarios.py 82 83 84 85 86 87         # outputs disabled, unused input, live timing
     python3 tools/control_scenarios.py 88 89 90 91 92 93 94 95 96   # outputs, AUTO, commands, logins, watchdog
     python3 tools/control_scenarios.py 97 98 99 100 101 102 103 104 105 # requests, drain, stops, crashes, flow guard
+    python3 tools/control_scenarios.py 110 111 112 113                # inverter reading, Solar tab data
+    python3 tools/control_scenarios.py 114 115 116 117 118 119 120 121 # solar permission (121: fake Modbus inverters)
     python3 tools/control_scenarios.py 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68   # historian only
     python3 tools/simulate_plant.py         # timeline of a simulated cold start
     python3 tools/simulate_plant.py --minutes 20 --historian logs/simulation.sqlite

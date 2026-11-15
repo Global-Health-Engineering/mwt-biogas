@@ -35,6 +35,7 @@ from pasteurizer.modes import Mode  # noqa: E402
 from pasteurizer.persistence import FileStore  # noqa: E402
 from pasteurizer.publisher import StatusPublisher  # noqa: E402
 from pasteurizer.simulated_io import PlantParameters, SimulatedPlant  # noqa: E402
+from pasteurizer.simulated_solar import SimulatedSolar  # noqa: E402
 from pasteurizer.watchdog import SoftwareWatchdog  # noqa: E402
 from scenarios.harness import FAST, TestSqliteStore, make_config  # noqa: E402
 
@@ -129,9 +130,12 @@ def main():
         print("WATCHDOG: no heartbeat, simulator outputs shut down")
 
     watchdog = SoftwareWatchdog(config.control.watchdog.heartbeat_timeout_s, watchdog_trip)
+    # Simulated inverter pair (sunny: 4 kW PV, 80 % SOC) for the solar permission.
+    solar = SimulatedSolar(plant)
     ctl = PlantController(config, reader=plant, writer=plant, store=FileStore(args.state),
                           event_log=log, clock=clock, simulated_io=True,
-                          heartbeat=watchdog.heartbeat, publish=publisher.publish)
+                          heartbeat=watchdog.heartbeat, publish=publisher.publish,
+                          solar=solar)
     stop = threading.Event()
 
     def watch():

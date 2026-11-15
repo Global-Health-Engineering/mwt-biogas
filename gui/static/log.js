@@ -1,13 +1,21 @@
 /* Log window: filters, pages of 100, live follow that pauses when you scroll
-   back, CSV export of the current filter. Uses the same GUI server. */
+   back, CSV export of the current filter. Uses the same GUI server.
+   Events of one scan cycle share data.cycle: clicking a row highlights the
+   others (e.g. a level change and the pump request it led to). */
 "use strict";
 
-const LOG = { meta: null, rows: [], newest: null, olderCursor: null, live: true, pageCursors: [] };
-const KINDS = ["STATE_TRANSITION", "MODE_CHANGE", "ALARM_RAISED", "ALARM_CLEARED", "ALARM_RESET",
-  "ALARM_ACKNOWLEDGED", "OPERATOR_ACTION", "OUTPUT_REQUESTED", "OUTPUT_WRITTEN", "OUTPUT_WRITE_FAILED",
-  "OUTPUT_WRITE_RECOVERED", "MODEL_STATUS", "LOG_GAP", "CLOCK_CORRECTION", "CLOCK_SYNC_CHANGED",
-  "CONTROLLER_START", "CONTROLLER_STOP", "CONFIG_CHANGED", "PREVIOUS_RUN_UNCLEAN",
-  "HISTORIAN_DB_RECOVERED", "HISTORIAN_STORAGE", "MANUAL_EXPIRED", "INDICATORS", "OUTPUT_NOT_WRITTEN", "OUTPUT_GATE"];
+const LOG = { meta: null, rows: [], newest: null, olderCursor: null, live: true, pageCursors: [],
+  selected: null };
+/* What the inputs did (signal_watch.py); hidden in the operator view. */
+const SIGNAL_KINDS = ["LEVEL_CHANGED", "SENSOR_VALIDITY", "FLOW_STARTED", "FLOW_STOPPED"];
+const KINDS = ["STATE_TRANSITION", "MODE_CHANGE", ...SIGNAL_KINDS, "ALARM_RAISED", "ALARM_CLEARED",
+  "ALARM_RESET", "ALARM_ACKNOWLEDGED", "OPERATOR_ACTION", "MANUAL_EXPIRED", "MANUAL_RELEASE_AUTOMATIC",
+  "OUTPUT_REQUESTED", "OUTPUT_WRITTEN", "OUTPUT_NOT_WRITTEN", "OUTPUT_WRITE_FAILED",
+  "OUTPUT_WRITE_RECOVERED", "WRITE_EXCEPTION", "INDICATORS", "MODEL_STATUS", "MODEL_RESULT_REJECTED",
+  "LOW_FLOW_RETRY_RESTORED", "CONTROLLER_START", "CONTROLLER_STOP", "CONFIG_CHANGED",
+  "PREVIOUS_RUN_UNCLEAN", "STATE_SAVE_FAILED", "STATE_SAVE_RECOVERED", "FAULT_STORAGE_UNREADABLE",
+  "LOG_GAP", "CLOCK_CORRECTION", "CLOCK_SYNC_CHANGED", "HISTORIAN_DB_RECOVERED",
+  "HISTORIAN_RECOVERY_ACKNOWLEDGED", "HISTORIAN_STORAGE", "SIGNAL_WATCH_ERROR", "OUTPUT_GATE"];
 const $ = (s) => document.querySelector(s);
 
 function filterQuery() {
@@ -18,12 +26,30 @@ function filterQuery() {
   if ($("#f-severity").value) q.set("severity", $("#f-severity").value);
   if ($("#f-equipment").value) q.set("equipment", $("#f-equipment").value);
   if ($("#f-kind").value) q.set("kinds", $("#f-kind").value);
+  else if ($("#f-detail").value === "operator") q.set("exclude_kinds", SIGNAL_KINDS.join(","));
   return q;
 }
 
+/* Events of one scan cycle of one controller run. */
+function cycleKey(r) {
+  const cycle = r.data && r.data.cycle;
+  return cycle === undefined || cycle === null ? null : `${r.boot_id}:${cycle}`;
+}
+
+function rowClass(r) {
+  const classes = [r.severity === "CRITICAL" ? "row-critical" : r.severity === "WARNING" ? "row-warning"
+    : r.kind === "OUTPUT_NOT_WRITTEN" ? "row-notwritten" : ""];
+  if (SIGNAL_KINDS.includes(r.kind)) classes.push("row-signal");
+  const key = cycleKey(r);
+  if (key) classes.push("row-linkable");
+  if (key && key === LOG.selected) classes.push("row-related");
+  return classes.filter(Boolean).join(" ");
+}
+
 function rowHtml(r) {
-  return `<tr class="${r.severity === "CRITICAL" ? "row-critical" : r.severity === "WARNING" ? "row-warning" : r.kind === "OUTPUT_NOT_WRITTEN" ? "row-notwritten" : ""}">
-    <td class="nowrap">${UI.time(r.utc)}</td>
+  const key = cycleKey(r);
+  return `<tr class="${rowClass(r)}"${key ? ` data-cycle="${UI.esc(key)}"` : ""}>
+    <td class="nowrap">${UI.time(r.utc)}${key ? `<br><span class="muted small">scan ${UI.esc(r.data.cycle)}</span>` : ""}</td>
     <td><span class="src">${UI.esc(r.source)}</span><br><span class="muted small">${UI.esc(UI.clockQuality(r.clock_source, r.clock_sync))}</span></td>
     <td>${UI.severity(r.severity)}</td>
     <td>${r.equipment.map((id) => `<span class="nowrap">${UI.esc(UI.tagOf(LOG.meta, id))}</span>`).join(", ")}</td>
@@ -39,6 +65,10 @@ function render() {
   $("#resume").hidden = LOG.live;
   $("#older").disabled = LOG.olderCursor === null;
   $("#page-info").textContent = `${LOG.rows.length} events shown${LOG.pageCursors.length ? ` · page ${LOG.pageCursors.length + 1}` : ""}`;
+  const related = LOG.selected ? LOG.rows.filter((r) => cycleKey(r) === LOG.selected).length : 0;
+  $("#related-info").textContent = LOG.selected
+    ? `${related} event${related === 1 ? "" : "s"} of scan ${LOG.selected.split(":")[1]} highlighted · click again to clear`
+    : "Click an event to highlight everything from the same scan cycle.";
   $("#export").href = "/api/export.csv?" + filterQuery().toString();
 }
 
@@ -107,6 +137,13 @@ async function init() {
   for (const k of KINDS) $("#f-kind").insertAdjacentHTML("beforeend", `<option>${k}</option>`);
   $("#filters").onsubmit = (ev) => { ev.preventDefault(); LOG.pageCursors = []; loadPage(); };
   $("#f-clear").onclick = () => { $("#filters").reset(); LOG.pageCursors = []; loadPage(); };
+  $("#f-detail").onchange = () => { LOG.pageCursors = []; loadPage(); };
+  $("#log-rows").addEventListener("click", (ev) => {
+    const row = ev.target.closest("tr[data-cycle]");
+    if (!row) return;
+    LOG.selected = LOG.selected === row.dataset.cycle ? null : row.dataset.cycle;
+    render();
+  });
   $("#older").onclick = () => { pause(); LOG.pageCursors.push(LOG.olderCursor); loadPage(LOG.olderCursor); };
   $("#newest").onclick = resume;
   $("#resume").onclick = resume;

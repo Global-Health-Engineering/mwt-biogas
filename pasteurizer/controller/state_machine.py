@@ -34,6 +34,10 @@ class ProcessStateMachine:
         self.path: TreatmentPath | None = None
         self.stop_hold = False
         self.preheat_since: float | None = None
+        # Time with the 3 kW heater written on in this PREHEAT_3KW stay. The
+        # preheat timeout counts this, not the waiting for solar permission.
+        self.preheat_heated_s = 0.0
+        self._preheat_tick: float | None = None
         self.dwell = Persistence()
         self.supply_lost = Persistence()
 
@@ -61,6 +65,8 @@ class ProcessStateMachine:
     def _enter(self, state, transition, now):
         if state == P.PREHEAT_3KW:
             self.preheat_since = now
+            self.preheat_heated_s = 0.0
+            self._preheat_tick = now
         if state in (P.IDLE, P.STOPPING, P.TRIPPED, P.PREHEAT_3KW):
             self.path = None
         if state not in ACTIVE_STATES:
@@ -76,8 +82,16 @@ class ProcessStateMachine:
         self.go(Transition(state, reason, **kwargs), now)
 
     # ------------------------------------------------------------------
+    def _count_preheat(self, now, last_written):
+        """Add the time since the last step when the 3 kW was written on."""
+        if self.state == P.PREHEAT_3KW and self._preheat_tick is not None:
+            if last_written is not None and last_written.heater_3kw:
+                self.preheat_heated_s += max(0.0, now - self._preheat_tick)
+        self._preheat_tick = now
+
     def step(self, inputs, flags, last_written):
         now = inputs.now
+        self._count_preheat(now, last_written)
         state = self.state
         if flags.summary.trip:
             self._to(P.TRIPPED, "Level 3 fault", now,

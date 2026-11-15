@@ -10,6 +10,7 @@ sys.path.insert(0, str(ROOT))
 from pasteurizer.arbiter import IndicatorInputs, OutputArbiter
 from pasteurizer.clock import FakeClock
 from pasteurizer.config import load_config
+from pasteurizer.energy import EnergyManager
 from pasteurizer.output_commands import (
     PERMISSIONED_COMMANDS,
     OutputCommands,
@@ -18,7 +19,12 @@ from pasteurizer.output_commands import (
 from pasteurizer.process_state import ProcessState
 
 
-config = load_config()
+# Sections 1-6 and 8 check the other rules: solar permission off here
+# (section 7 checks it with an EnergyManager).
+solar_config = load_config()
+config = replace(solar_config, arbiter=replace(
+    solar_config.arbiter,
+    energy=replace(solar_config.arbiter.energy, solar_permission_enabled=False)))
 clock = FakeClock(0.0)
 ALL = OutputPermissions.only(*PERMISSIONED_COMMANDS)
 
@@ -29,7 +35,7 @@ def make_arbiter(cfg=config):
 
 def run(arbiter, requested, permissions=ALL, *, seconds=0.2,
         state=ProcessState.IDLE, warning=False, trip=False,
-        battery=None, write_ok=True, release=False, plant_safe=False):
+        energy=None, write_ok=True, release=False, plant_safe=False):
     """Arbitrate and write every 0.2 s for `seconds`; return the last result."""
     result = None
     for _ in range(max(1, round(seconds / 0.2))):
@@ -39,7 +45,7 @@ def run(arbiter, requested, permissions=ALL, *, seconds=0.2,
             IndicatorInputs(state, warning, trip, release_permitted=release,
                             fallback_path=state in (ProcessState.FALLBACK_QUALIFY,
                                                     ProcessState.FALLBACK_TREATMENT)),
-            clock.monotonic(), battery_percent=battery, plant_safe=plant_safe,
+            clock.monotonic(), energy=energy, plant_safe=plant_safe,
         )
         arbiter.record_write(result.commands, clock.monotonic(), write_ok)
     return result
@@ -136,18 +142,25 @@ assert (result.commands.light_green, result.commands.light_yellow,
         result.commands.light_red) == (False, True, True)
 print("6. Lights: green blinks until release, steady with release; red blinks on fallback.")
 
-# 7. Battery level hook -----------------------------------------------------
-battery_config = replace(config, arbiter=replace(
-    config.arbiter, battery_level_available=True,
-    min_battery_percent={"heater_3kw": 50.0, "heater_1kw": 30.0},
-))
-arbiter = make_arbiter(battery_config)
+# 7. Solar permission (energy.py) --------------------------------------------
+def solar(pv, load, soc=80):
+    inv = {"fresh": True, "name": "Inverter", "reading": {"battery_soc_pct": soc}}
+    return {"enabled": True, "inverters": [inv, dict(inv)],
+            "totals": {"complete": True, "pv_w": pv, "load_w": load, "battery_w": load - pv}}
+
+
+energy = EnergyManager(replace(solar_config.arbiter.energy, start_delay_s=0.0),
+                       start_time=clock.monotonic())
+arbiter = make_arbiter(solar_config)
 heat = OutputCommands(heater_3kw=True)
-run(arbiter, heat, seconds=10.4, state=ProcessState.PREHEAT_3KW, battery=80.0)
-assert run(arbiter, heat, battery=80.0).commands.heater_3kw is True
-assert rules(run(arbiter, heat, battery=None), "heater_3kw") == ["ENERGY_UNKNOWN"]
-assert rules(run(arbiter, heat, battery=40.0), "heater_3kw")[0] == "ENERGY_LOW"
-print("7. With battery data enabled, 3 kW needs a known level above the minimum.")
+run(arbiter, OutputCommands(), seconds=10.4)
+status, _ = energy.update(solar(pv=800, load=300), {}, clock.monotonic())
+assert status.modes["heater_3kw"].permitted is False      # 500 W < 600 W
+assert rules(run(arbiter, heat, energy=status), "heater_3kw") == ["ENERGY_SOLAR"]
+assert rules(run(arbiter, heat), "heater_3kw") == ["ENERGY_UNKNOWN"]
+status, _ = energy.update(solar(pv=1000, load=300), {}, clock.monotonic())
+assert run(arbiter, heat, energy=status).commands.heater_3kw is True   # 700 W >= 600 W
+print("7. Solar permission: the 3 kW needs 600 W surplus; no evaluation, no heating.")
 
 # 8. Write failure restarts the pause ---------------------------------------
 arbiter = make_arbiter()

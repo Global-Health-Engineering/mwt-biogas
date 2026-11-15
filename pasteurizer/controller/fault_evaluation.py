@@ -164,8 +164,9 @@ class FaultEvaluator:
         return False if cool else None
 
     def _preheat(self, inputs, process):
-        overdue = (process.state == P.PREHEAT_3KW and process.preheat_since is not None
-                   and inputs.now - process.preheat_since > self.cs.preheat.max_duration_s)
+        # Counts heater-on time only: waiting for solar permission never trips.
+        overdue = (process.state == P.PREHEAT_3KW
+                   and process.preheat_heated_s > self.cs.preheat.max_duration_s)
         self.faults.set("PREHEAT_TIMEOUT", True if overdue else
                         (False if inputs.pt5 is not None else None))
 

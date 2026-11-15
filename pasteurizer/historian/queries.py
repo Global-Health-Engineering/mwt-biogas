@@ -5,7 +5,8 @@ and closes it again, so a GUI request can never write, lock out the writer
 for long, or pull an unbounded result into memory.
 
 events()  newest first, paged by id (`before_id` scrolls back, `after_id`
-          follows live); filters: time range, kinds, severity, equipment
+          follows live); filters: time range, kinds, excluded kinds, severity,
+          equipment
 trend()   one series per name, decimated to about `max_points`; every point
           carries its run (boot_id) so lines break between controller runs,
           invalid readings are None, and logged gaps are returned separately
@@ -95,7 +96,8 @@ class HistoryReader:
 
     # Events ----------------------------------------------------------------
     def events(self, *, since=None, until=None, kinds=None, severity=None,
-               equipment=None, before_id=None, after_id=None, limit=100) -> Page:
+               equipment=None, before_id=None, after_id=None, limit=100,
+               exclude_kinds=None) -> Page:
         limit = max(1, min(int(limit), MAX_PAGE))
         columns = ("id",) + SOURCE_COLUMNS + ("utc", "utc_epoch", "clock_sync", "boot_id",
                                               "sequence", "monotonic_s", "kind", "data")
@@ -109,15 +111,23 @@ class HistoryReader:
         if kinds:
             where.append(f"kind IN ({', '.join('?' * len(kinds))})")
             args.extend(kinds)
+        if exclude_kinds:
+            where.append(f"kind NOT IN ({', '.join('?' * len(exclude_kinds))})")
+            args.extend(exclude_kinds)
         if severity or equipment:
             codes = _codes(severity, equipment)
             alarm = (f"(kind LIKE 'ALARM_%' AND json_extract(data, '$.code') IN "
                      f"({', '.join('?' * len(codes)) or 'NULL'}))")
             args.extend(codes)
             if equipment and not severity:
-                # Output events that changed this command count as its events too.
-                alarm = f"({alarm} OR json_extract(data, ?) IS NOT NULL)"
+                # Output events that changed this command count as its events too,
+                # and signal events of this sensor (Y4 feedback counts for Y4).
+                sensors = [equipment] + (["y4_feedback"]
+                                         if equipment == "control_valve_percent" else [])
+                alarm = (f"({alarm} OR json_extract(data, ?) IS NOT NULL OR "
+                         f"json_extract(data, '$.sensor') IN ({', '.join('?' * len(sensors))}))")
                 args.append(f"$.changes.{equipment}")
+                args.extend(sensors)
             where.append(alarm)
         if before_id is not None:
             where.append("id < ?")

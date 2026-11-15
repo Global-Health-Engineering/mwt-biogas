@@ -12,6 +12,9 @@ from scenarios import (  # noqa: F401  (imported for registration)
     manual,
     operator,
     shadow,
+    signal_log,
+    solar,
+    energy,
     startup_heating,
     treatment,
 )

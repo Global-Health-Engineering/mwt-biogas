@@ -160,6 +160,11 @@ class LoggingSettings:
     write_batch_size: int = num(minimum=1, maximum=10000, integer=True)
     flush_interval_s: float = num(positive=True, maximum=60.0)
     retry_interval_s: float = num(positive=True, maximum=600.0)
+    # Signal events in the log (recorder.SignalWatch); logging only, no control effect.
+    signal_validity_hold_s: float = num(0.0, 600.0)     # validity must persist this long
+    flow_activity_min_l_min: float = num(positive=True, maximum=100.0)
+    flow_activity_min_pulse_hz: float = num(positive=True, maximum=10000.0)  # no K-factor
+    flow_activity_hold_s: float = num(0.0, 600.0)       # start/stop must persist this long
 
 
 @dataclass(frozen=True)

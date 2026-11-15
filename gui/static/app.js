@@ -359,9 +359,12 @@ function showTab(tab) {
   $("#view-pasteurizer").hidden = tab !== "pasteurizer";
   $("#view-trends").hidden = tab !== "trends";
   $("#view-manual").hidden = tab !== "manual";
-  $("#side").hidden = tab === "trends" || tab === "manual";
-  document.querySelector("main").classList.toggle("wide", tab === "trends" || tab === "manual");
+  $("#view-solar").hidden = tab !== "solar";
+  const wide = tab === "trends" || tab === "manual" || tab === "solar";
+  $("#side").hidden = wide;
+  document.querySelector("main").classList.toggle("wide", wide);
   if (tab === "trends") TRENDS.show();
+  if (tab === "solar") SOLAR.show();
   renderCard();
 }
 
@@ -378,6 +381,7 @@ async function init() {
   $("#open-log").onclick = () => window.open("/log", "mwt-biogas-log", "width=1200,height=800");
   TRENDS.init();
   MANUAL.init();
+  SOLAR.init();     // own 5 s poll of /api/solar, independent of the controller link
   showTab("edibl");
   await poll();
   setInterval(poll, 1000);

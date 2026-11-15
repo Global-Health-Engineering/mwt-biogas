@@ -20,6 +20,10 @@
   <label>Severity <select id="f-severity"><option value="">Any</option><option>CRITICAL</option><option>WARNING</option></select></label>
   <label>Equipment <select id="f-equipment"><option value="">Any</option></select></label>
   <label>Event <select id="f-kind"><option value="">Any</option></select></label>
+  <label>Detail <select id="f-detail">
+    <option value="all">All, with signal events</option>
+    <option value="operator">Operator (no level, flow or validity events)</option>
+  </select></label>
   <button type="submit">Apply</button>
   <button type="button" id="f-clear" class="secondary">Clear</button>
   <a id="export" class="button secondary" href="/api/export.csv">Export CSV (current filter)</a>
@@ -30,6 +34,7 @@
   <button id="newest" class="secondary">Newest</button>
   <button id="older" class="secondary">Older ▸</button>
   <span id="page-info" class="muted"></span>
+  <span id="related-info" class="muted">Click an event to highlight everything from the same scan cycle.</span>
 </div>
 <div id="log-scroll" class="log-scroll">
   <table class="log">

@@ -163,7 +163,7 @@ def shadow_controller(sim) -> ShadowOutputWriter:
     writer = ShadowOutputWriter()
     sim.ctl = PlantController(sim.config, reader=sim.plant, writer=writer, store=sim.store,
                               event_log=sim.log, clock=sim.clock, simulated_io=True,
-                              heartbeat=sim.watchdog.heartbeat)
+                              heartbeat=sim.watchdog.heartbeat, solar=sim.solar)
     return writer
 
 
@@ -412,7 +412,8 @@ def s87():
 
     sim.ctl = PlantController(sim.config, reader=LaterStampReader(), writer=plant,
                               store=sim.store, event_log=sim.log, clock=sim.clock,
-                              simulated_io=True, heartbeat=sim.watchdog.heartbeat)
+                              simulated_io=True, heartbeat=sim.watchdog.heartbeat,
+                              solar=sim.solar)
     sim.run(5)
     acquisition = sim.status.signals["acquisition"]
     assert acquisition["valid"] is True and acquisition["age_seconds"] >= 0, acquisition

@@ -4,6 +4,9 @@ Independent equipment (transfer pumps, manhole drain, overflow valves) has
 its own level logic in every mode. Process equipment (heaters, circulation,
 Y3/Y4) follows the plant state in AUTO and expiring commissioning requests
 in MANUAL. Permissions only allow requests; the arbiter decides the frame.
+
+Every command also gets an explanation (reason and blocking protections) for
+the event log; explanations never change what is requested.
 """
 
 from dataclasses import dataclass
@@ -37,6 +40,8 @@ class RequestSet:
     permissions: OutputPermissions
     release_permitted: bool     # treatment permission held and Y4 commanded open
     events: tuple = ()          # (kind, data) for the event log, e.g. a used-up drain STOP
+    # command -> {"reason": text, "blocked_by": [codes], "not_permitted": text?}
+    explanations: dict = None
 
 
 class _Frame:
@@ -48,13 +53,22 @@ class _Frame:
         self.permitted = set()
         self.reasons = {}
         self.events = []
+        self.explanations = {}
 
-    def request(self, name, value, permitted=True, reason=None):
+    def request(self, name, value, permitted=True, reason=None, *, why=None,
+                blocked_by=()):
         self.requests[name] = value
         if permitted:
             self.permitted.add(name)
         elif reason:
             self.reasons[name] = reason
+        self.explain(name, why, blocked_by)
+
+    def explain(self, name, why, blocked_by=()):
+        entry = {"reason": why or "Not requested", "blocked_by": list(blocked_by)}
+        if self.reasons.get(name) and name not in self.permitted:
+            entry["not_permitted"] = self.reasons[name]
+        self.explanations[name] = entry
 
     def result(self, release) -> RequestSet:
         return RequestSet(
@@ -62,6 +76,8 @@ class _Frame:
             OutputPermissions.only(*sorted(self.permitted), reasons=self.reasons),
             release,
             tuple(self.events),
+            {name: self.explanations.get(name, {"reason": "Not requested", "blocked_by": []})
+             for name in self.requests},
         )
 
 
@@ -88,6 +104,12 @@ class OutputRequestBuilder:
             self.assist.reset()
             if inputs.mode == Mode.MANUAL:
                 self._manual_process(frame, inputs, flags, manual, manual_requests)
+            else:
+                why = (f"Selector {inputs.mode.value}: process equipment off"
+                       if inputs.mode is not None else
+                       "Selector or acquisition invalid: process equipment off")
+                for name in HEATING_COMMANDS + VALVE_COMMANDS:
+                    frame.explain(name, why)
         return frame.result(release)
 
     # Independent equipment -------------------------------------------------
@@ -112,10 +134,14 @@ class OutputRequestBuilder:
             permitted = (inputs.acquisition_ok and not blocked
                          and inputs.mode in (Mode.AUTO, Mode.MANUAL))
             frame.request(name, on, permitted,
-                          f"Transfer {line} fault" if blocked else None)
+                          f"Transfer {line} fault" if blocked else None,
+                          why=decision.reason if decision else "Acquisition unavailable",
+                          blocked_by=decision.inhibited_by if decision else
+                          ("SAMPLING_UNAVAILABLE",))
 
     def _manhole_drain(self, frame, inputs, manual_requests, manual):
         if not inputs.acquisition_ok:
+            frame.explain("manhole_drain", "Acquisition unavailable", ("SAMPLING_UNAVAILABLE",))
             return
         requested = manual_requests.get("manhole_drain")     # {} outside MANUAL
         decision = self.drain.process(
@@ -130,33 +156,53 @@ class OutputRequestBuilder:
             frame.events.append(("MANUAL_RELEASE_AUTOMATIC", {
                 "command": "manhole_drain", "user": holder,
                 "cause": "New water event ends the manual STOP; automatic drainage resumes"}))
-        frame.request("manhole_drain", decision.request.on)    # off while STOP-inhibited
+        frame.request("manhole_drain", decision.request.on,    # off while STOP-inhibited
+                      why=decision.request.reason, blocked_by=decision.request.inhibited_by)
 
     def _overflow_valves(self, frame, inputs, manual_requests):
         for line in LINES:
             name = f"overflow_valve_{line}_open"
             level = inputs.level(self.cfg.level_roles[f"line_{line}_tank_overflow"])
-            automatic = self.overflow[line].update(level, inputs.now)
-            frame.request(name, automatic or bool(manual_requests.get(name, False)))
+            valve = self.overflow[line]
+            automatic = valve.update(level, inputs.now)
+            by_hand = bool(manual_requests.get(name, False))
+            frame.request(name, automatic or by_hand,
+                          why=_overflow_reason(valve, level, automatic, by_hand))
 
     # Process equipment, AUTO --------------------------------------------------
     def _auto_process(self, frame, inputs, flags, process, arbiter) -> bool:
         state = process.state
+        why = f"Plant state {state.value}"
+        heating = () if flags.heating_ok else ("HEATING_NOT_PERMITTED",)
         frame.request("heater_3kw", state == P.PREHEAT_3KW,
-                      flags.heating_ok and state == P.PREHEAT_3KW)
+                      flags.heating_ok and state == P.PREHEAT_3KW, why=why,
+                      blocked_by=heating)
         second_stage = state in SECOND_STAGE_STATES
         permitted = flags.heating_ok and second_stage
-        frame.request("heating_circulation", second_stage, permitted)
-        frame.request("heater_1kw", self._assist(inputs, flags, process, second_stage),
-                      permitted)
+        frame.request("heating_circulation", second_stage, permitted, why=why,
+                      blocked_by=heating)
+        assist = self._assist(inputs, flags, process, second_stage)
+        frame.request("heater_1kw", assist, permitted,
+                      why=self._assist_reason(inputs, process, second_stage, assist, why),
+                      blocked_by=heating)
         if state not in TREATMENT_STATES:
+            for name in VALVE_COMMANDS:
+                frame.explain(name, f"{why}: no treatment")
             return False
 
         treatment_ok = (inputs.supply is True and inputs.acquisition_ok
                         and not flags.treatment_fault and not flags.summary.trip)
-        frame.request("pasteurizer_isolation_open", True, treatment_ok)
+        blocked = [code for code, on in (
+            ("NO_SUPPLY", inputs.supply is not True),
+            ("SAMPLING_UNAVAILABLE", not inputs.acquisition_ok),
+            ("TREATMENT_FAULT", flags.treatment_fault),
+            ("TRIP", flags.summary.trip)) if on]
+        path = process.path.value if process.path is not None else None
+        frame.request("pasteurizer_isolation_open", True, treatment_ok,
+                      why=f"{why}: treatment", blocked_by=blocked)
         frame.request("control_valve_percent", float(process.treatment.y4_command),
-                      treatment_ok)
+                      treatment_ok, why=f"{why}: treatment control, path {path}",
+                      blocked_by=blocked)
         written = arbiter.last_written
         return treatment_ok and written is not None and written.control_valve_percent > 0
 
@@ -169,6 +215,17 @@ class OutputRequestBuilder:
         return self.assist.update(inputs.pt5, on_below, off_at,
                                   flags.heating_ok and second_stage, inputs.now)
 
+    def _assist_reason(self, inputs, process, second_stage, on, why):
+        if not second_stage:
+            return why
+        h = self.cs.heater_1kw
+        fallback = process.path == TreatmentPath.FALLBACK
+        on_below = h.fallback_on_below_c if fallback else h.normal_on_below_c
+        off_at = h.fallback_off_at_c if fallback else h.normal_off_at_c
+        pt5 = "invalid" if inputs.pt5 is None else f"{inputs.pt5:.1f} °C"
+        return (f"{why}: assist {'on' if on else 'off'}, PT5 {pt5} "
+                f"(on below {on_below:g} °C, off at {off_at:g} °C)")
+
     # Process equipment, MANUAL ------------------------------------------------
     def _manual_process(self, frame, inputs, flags, manual, manual_requests):
         trip_limit = self.cs.faults.overtemperature_trip_c
@@ -179,14 +236,37 @@ class OutputRequestBuilder:
                       and not pasteurizer_trip)
         for name in HEATING_COMMANDS:
             frame.request(name, bool(manual_requests.get(name, False)), heating_ok,
-                          "Heating inhibited" if not heating_ok else None)
+                          "Heating inhibited" if not heating_ok else None,
+                          why=_manual_reason(manual, name))
 
         valves_ok = inputs.acquisition_ok and (not pasteurizer_trip
                                                or manual.valve_test_active)
         reason = "Pasteurizer Level 3; valve test not allowed" if not valves_ok else None
         frame.request("pasteurizer_isolation_open",
                       bool(manual_requests.get("pasteurizer_isolation_open", False)),
-                      valves_ok, reason)
+                      valves_ok, reason, why=_manual_reason(manual, "pasteurizer_isolation_open"))
         frame.request("control_valve_percent",
                       float(manual_requests.get("control_valve_percent", 0.0)),
-                      valves_ok, reason)
+                      valves_ok, reason, why=_manual_reason(manual, "control_valve_percent"))
+
+
+def _manual_reason(manual, name) -> str:
+    request = manual.requests.get(name) if hasattr(manual, "requests") else None
+    user = getattr(request, "user", None)
+    if name in manual.active_requests():
+        return f"Manual request{' by ' + user if user else ''}"
+    return "No manual request"
+
+
+def _overflow_reason(valve, level, automatic, by_hand) -> str:
+    if by_hand and not automatic:
+        return "Manual open request"
+    if level is None:
+        return "Overflow level unknown: closed (power-loss position)"
+    if automatic and level:
+        return "Overflow switch reached: open"
+    if automatic:
+        return "Overflow cleared: minimum open / clear time running"
+    if level:
+        return "Overflow detected: confirmation delay running"
+    return "No overflow"

@@ -40,6 +40,13 @@ Files (separate per output mode, never shared with the simulation):
     both:      logs/controller.lock (one controller on the hardware),
                logs/command.token (GUI -> controller commands; removed at stop)
 
+Solar: the controller is the only Modbus client of the two Deye inverters
+(config/solar_settings.json, pasteurizer/solar.py, background threads; the
+scan never waits for Modbus). Their data gives the solar permission for the
+electric heaters (arbiter_settings.json energy, pasteurizer/energy.py) and is
+published in the status for the GUI. Without pymodbus or inverter data the
+electric heaters get no permission; the biogas heating is not affected.
+
 Reset of latched faults: RESET in the GUI (logged in). To clear the state
 file instead: stop the controller, check `pgrep -af run_controller.py` prints
 nothing, delete the state file of that mode, start again. Never delete it
@@ -66,6 +73,7 @@ from pasteurizer.event_log import EventLog  # noqa: E402
 from pasteurizer.historian import Historian, SqliteStore  # noqa: E402
 from pasteurizer.persistence import FileStore, mark_abnormal_stop  # noqa: E402
 from pasteurizer.publisher import StatusPublisher  # noqa: E402
+from pasteurizer.solar import SolarLink  # noqa: E402
 from pasteurizer.run_lock import RunLock  # noqa: E402
 from pasteurizer.shadow_outputs import ShadowOutputWriter  # noqa: E402
 from pasteurizer.systemd_notify import SystemdNotifier  # noqa: E402
@@ -117,6 +125,8 @@ def main():
     parser.add_argument("--port", type=int, default=8081, help="status publisher port")
     parser.add_argument("--command-port", type=int, default=8082)
     parser.add_argument("--minutes", type=float, default=None, help="stop after (tests)")
+    parser.add_argument("--config", type=Path, default=None,
+                        help="configuration folder (default: config/; tests use a copy)")
     args = parser.parse_args()
     database_name, state_name = FILES[args.outputs]
     args.database = args.database or LOGS / database_name
@@ -134,7 +144,7 @@ def main():
     from pasteurizer.hardware import HardwareReader     # needs revpimodio2 (RevPi)
 
     enabled = args.outputs == "enabled"
-    config = load_config()
+    config = load_config(args.config)
     clock = MonotonicClock()
     notifier = SystemdNotifier()
     reader = HardwareReader(mapping=reader_mapping(config), clock=clock)
@@ -177,10 +187,17 @@ def main():
                 os._exit(EXIT_WATCHDOG)
         threading.Thread(target=force_exit, name="watchdog-exit", daemon=True).start()
 
+    solar = SolarLink(config.solar)         # read-only; nothing starts when disabled
+    solar.start()
+    names = ", ".join("{name} {host}:{port}".format(**i) for i in config.solar["inverters"])
+    print(f"Solar: {names}, every {config.solar['poll_s']:g} s (read-only)"
+          if config.solar["enabled"] else
+          "Solar: disabled in solar_settings.json (electric heaters get no solar permission)")
     watchdog = SoftwareWatchdog(config.control.watchdog.heartbeat_timeout_s, watchdog_trip)
     ctl = PlantController(config, reader=reader, writer=writer, store=state_store,
                           event_log=log, clock=clock, simulated_io=False,
-                          heartbeat=watchdog.heartbeat, publish=publisher.publish)
+                          heartbeat=watchdog.heartbeat, publish=publisher.publish,
+                          solar=solar)
     if ctl.outputs_enabled is not enabled:
         raise SystemExit("Refused: output writer does not match --outputs")
 
@@ -244,6 +261,7 @@ def main():
             marked = guarded(problems, "abnormal stop marker", lambda: mark_abnormal_stop(args.state))
             print(f"Abnormal stop recorded in {args.state}: {marked}")
         guarded(problems, "status publisher", publisher.stop)
+        guarded(problems, "solar reader", solar.stop)
         guarded(problems, "input reader", reader.close)
         guarded(problems, "lock", lock.release)
         stopped.set()

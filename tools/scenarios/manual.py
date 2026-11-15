@@ -10,6 +10,7 @@ script that patches PlantController.cycle.
 
 from http.client import HTTPConnection
 import json
+import shutil
 import os
 from pathlib import Path
 import signal
@@ -507,9 +508,35 @@ def s99():
         loop.stop()
 
 
+def config_copy(folder, arbiter=None, solar=None):
+    """config/ copied into folder/config with dotted-path changes, for
+    run_controller(--config). Returns the folder path."""
+    target = folder / "config"
+    shutil.copytree(ROOT / "config", target, dirs_exist_ok=True)
+    for name, changes in (("arbiter_settings.json", arbiter), ("solar_settings.json", solar)):
+        if changes:
+            data = json.loads((target / name).read_text())
+            for path, value in changes.items():
+                node = data
+                *parents, key = path.split(".")
+                for part in parents:
+                    node = node[part]
+                node[key] = value
+            (target / name).write_text(json.dumps(data))
+    return target
+
+
+# The end-to-end runner scenarios check other things than the solar
+# permission (tools/scenarios/energy.py has its own end-to-end check).
+NO_SOLAR_RULE = {"energy.solar_permission_enabled": False}
+
+
 def run_controller(folder, values, minutes=None, extra=(), env_extra=None, script=None):
     """Start tools/run_controller.py on the fake RevPi as the systemd unit does
-    (outputs enabled); script: a wrapper to run instead (fault injection)."""
+    (outputs enabled); script: a wrapper to run instead (fault injection).
+    Uses folder/config when it exists (config_copy)."""
+    if (folder / "config").is_dir():
+        extra = (*extra, "--config", str(folder / "config"))
     env = dict(os.environ, PYTHONPATH=str(fake_revpi_dir()),
                FAKE_REVPI_WRITE_LOG=str(folder / "writes.txt"),
                FAKE_REVPI_OUTPUTS=str(folder / "outputs.json"),
@@ -629,6 +656,7 @@ def outputs(folder):
 def s93():
     folder = Path(tempfile.mkdtemp())
     UserStore(folder / "users.json").set_user("comm", "COMMISSIONING", PASSWORD)
+    config_copy(folder, NO_SOLAR_RULE)
     process, port = run_controller(folder, {"I_3": True, "I_4": False}, 0.45)   # S1 in MANUAL
     gui = None
     try:
@@ -676,6 +704,7 @@ def s93():
 @scenario(94, "End to end: AUTO writes the agreed outputs (3 kW preheat); safe_outputs refuses while running")
 def s94():
     folder = Path(tempfile.mkdtemp())
+    config_copy(folder, NO_SOLAR_RULE)
     process, port = run_controller(folder, {"I_3": False, "I_4": True, "I_8_i06": True}, 0.4)  # AUTO, supply
     channels = output_channels(load_config())
     try:

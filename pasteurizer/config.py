@@ -96,14 +96,31 @@ class DrainSettings:
 
 
 @dataclass(frozen=True)
+class EnergySettings:
+    """Solar-based permission for the electric heaters (pasteurizer/energy.py).
+
+    The biogas heating (heating_circulation) is never gated by this."""
+
+    solar_permission_enabled: bool
+    # Rated electrical power per heater; also what is subtracted from the
+    # measured load while that heater is on (no double counting).
+    heater_power_w: dict[str, float]
+    start_surplus_fraction: float       # 0.20: 200 / 600 / 800 W
+    stop_surplus_fraction: float        # 0.15: below this for stop_delay_s -> off
+    start_delay_s: float
+    stop_delay_s: float
+    soc_start_min_percent: float        # may start at >= 30 %
+    soc_stop_at_percent: float          # stops at once at <= 20 %
+    communication_timeout_s: float      # missing inverter data -> off after this
+
+
+@dataclass(frozen=True)
 class ArbiterSettings:
     settings_validated: bool
     preheat_heater: str
     preheat_excluded_outputs: tuple[str, ...]
     switching_pause_seconds: float
-    battery_level_available: bool
-    # Separate battery permission per heater, e.g. {"heater_3kw": 60.0}.
-    min_battery_percent: dict[str, float | None]
+    energy: EnergySettings
     isolation_open_before_control_valve_seconds: float
     compressor_enabled: bool
     cabinet_fan_disable_allowed: bool
@@ -124,6 +141,8 @@ class PlantConfig:
     drain: DrainSettings
     arbiter: ArbiterSettings
     control: ControlSettings
+    # Deye inverters (pasteurizer/solar.py check_settings): hosts, timing.
+    solar: dict
     # role name -> level switch name, e.g. "line_1_tank_low" -> "level_switch_2"
     level_roles: dict[str, str]
     # OutputCommands field -> equipment identifier, e.g. "transfer_pump_1" -> "pump_120w_1_..."
@@ -375,6 +394,58 @@ def _switched_list(value, where):
     return tuple(value)
 
 
+ENERGY_HEATERS = ("heater_1kw", "heater_3kw")
+
+
+def _energy(data, where) -> EnergySettings:
+    _exact_keys(data, ("solar_permission_enabled", "heater_power_w",
+                       "start_surplus_fraction", "stop_surplus_fraction",
+                       "start_delay_s", "stop_delay_s", "soc_start_min_percent",
+                       "soc_stop_at_percent", "communication_timeout_s"), where)
+    powers = _exact_keys(data["heater_power_w"], ENERGY_HEATERS, f"{where}.heater_power_w")
+    settings = EnergySettings(
+        solar_permission_enabled=_boolean(data["solar_permission_enabled"],
+                                          f"{where}.solar_permission_enabled"),
+        heater_power_w={name: _number(powers[name], f"{where}.heater_power_w.{name}",
+                                      strictly_positive=True, maximum=20000.0)
+                        for name in ENERGY_HEATERS},
+        start_surplus_fraction=_number(data["start_surplus_fraction"],
+                                       f"{where}.start_surplus_fraction",
+                                       strictly_positive=True, maximum=1.0),
+        stop_surplus_fraction=_number(data["stop_surplus_fraction"],
+                                      f"{where}.stop_surplus_fraction",
+                                      minimum=0.0, maximum=1.0),
+        start_delay_s=_number(data["start_delay_s"], f"{where}.start_delay_s",
+                              minimum=0.0, maximum=3600.0),
+        stop_delay_s=_number(data["stop_delay_s"], f"{where}.stop_delay_s",
+                             minimum=0.0, maximum=3600.0),
+        soc_start_min_percent=_number(data["soc_start_min_percent"],
+                                      f"{where}.soc_start_min_percent",
+                                      minimum=0.0, maximum=100.0),
+        soc_stop_at_percent=_number(data["soc_stop_at_percent"],
+                                    f"{where}.soc_stop_at_percent",
+                                    minimum=0.0, maximum=100.0),
+        communication_timeout_s=_number(data["communication_timeout_s"],
+                                        f"{where}.communication_timeout_s",
+                                        minimum=0.0, maximum=3600.0),
+    )
+    if settings.stop_surplus_fraction > settings.start_surplus_fraction:
+        raise ConfigError(f"{where}: stop_surplus_fraction must not exceed "
+                          "start_surplus_fraction (hysteresis)")
+    if settings.soc_stop_at_percent >= settings.soc_start_min_percent:
+        raise ConfigError(f"{where}: soc_stop_at_percent must be below "
+                          "soc_start_min_percent (hysteresis)")
+    return settings
+
+
+def _solar(data, where) -> dict:
+    from pasteurizer.solar import check_settings     # no pymodbus needed here
+    try:
+        return check_settings(data, where)
+    except ValueError as error:
+        raise ConfigError(str(error)) from None
+
+
 def _arbiter(data, where):
     _exact_keys(data, ("settings_validated", "preheat_exclusion", "energy",
                        "isolation_valve", "compressor_enabled",
@@ -382,9 +453,7 @@ def _arbiter(data, where):
     preheat = _exact_keys(data["preheat_exclusion"],
                           ("heater", "excluded_outputs", "switching_pause_seconds"),
                           f"{where}.preheat_exclusion")
-    energy = _exact_keys(data["energy"],
-                         ("battery_level_available", "min_battery_percent"),
-                         f"{where}.energy")
+    energy = _energy(data["energy"], f"{where}.energy")
     isolation = _exact_keys(data["isolation_valve"],
                             ("open_before_control_valve_seconds",),
                             f"{where}.isolation_valve")
@@ -400,22 +469,6 @@ def _arbiter(data, where):
     if heater in excluded:
         raise ConfigError(f"{where}.preheat_exclusion: heater cannot exclude itself")
 
-    battery_available = _boolean(energy["battery_level_available"],
-                                 f"{where}.energy.battery_level_available")
-    minimums = _exact_keys(energy["min_battery_percent"],
-                           ("heater_3kw", "heater_1kw"),
-                           f"{where}.energy.min_battery_percent")
-    min_battery = {
-        name: _number(value, f"{where}.energy.min_battery_percent.{name}",
-                      minimum=0.0, maximum=100.0, allow_none=True)
-        for name, value in minimums.items()
-    }
-    if battery_available and None in min_battery.values():
-        raise ConfigError(
-            f"{where}.energy: every min_battery_percent is required when "
-            "battery_level_available is true"
-        )
-
     return ArbiterSettings(
         settings_validated=_boolean(data["settings_validated"],
                                     f"{where}.settings_validated"),
@@ -425,8 +478,7 @@ def _arbiter(data, where):
             preheat["switching_pause_seconds"],
             f"{where}.preheat_exclusion.switching_pause_seconds",
             minimum=0.0, maximum=600.0),
-        battery_level_available=battery_available,
-        min_battery_percent=min_battery,
+        energy=energy,
         isolation_open_before_control_valve_seconds=_number(
             isolation["open_before_control_valve_seconds"],
             f"{where}.isolation_valve.open_before_control_valve_seconds",
@@ -583,6 +635,7 @@ FILES = (
     "flow_settings.json",
     "io_mapping.json",
     "level_settings.json",
+    "solar_settings.json",
     "startup_settings.json",
     "temperature_settings.json",
     "treatment_settings.json",
@@ -647,6 +700,7 @@ def load_config(directory=None) -> PlantConfig:
         "control": _control(documents["control_settings.json"]),
         "arbiter": _arbiter(documents["arbiter_settings.json"],
                             "arbiter_settings.json"),
+        "solar": _solar(documents["solar_settings.json"], "solar_settings.json"),
         "level_roles": level_roles,
         "command_outputs": command_outputs,
         "io_mapping": io_mapping,

@@ -78,6 +78,9 @@ class ControllerStatus:
     # written, `written` stays None and output_write says why.
     outputs_enabled: bool = True
     output_write: str = ""      # WRITTEN / WRITE_FAILED / NOT_WRITTEN_OUTPUTS_DISABLED
+    # Solar permission for the electric heaters: {"status": EnergyStatus,
+    # "solar": SolarLink view (inverters), "settings": thresholds}.
+    energy: dict = field(default_factory=dict)
 
 
 def _iso(epoch) -> str:
@@ -121,7 +124,7 @@ def model_summary(inputs, enabled: bool) -> dict:
 def build_status(*, cycle, inputs, process, requests, result, write_ok,
                  keeper, faults, manual, historian=None, identity=None,
                  lamp_modes=None, model_enabled=False,
-                 outputs_enabled=True) -> ControllerStatus:
+                 outputs_enabled=True, energy=None) -> ControllerStatus:
     """write_ok: the output layer accepted the frame. It counts as written only
     when outputs are enabled; a shadow writer's acceptance is never a write."""
     frame = result.commands
@@ -170,4 +173,5 @@ def build_status(*, cycle, inputs, process, requests, result, write_ok,
         model=model_summary(inputs, model_enabled),
         outputs_enabled=outputs_enabled,
         output_write=output_write,
+        energy=energy or {},
     )

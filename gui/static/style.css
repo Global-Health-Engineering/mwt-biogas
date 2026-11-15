@@ -145,6 +145,10 @@ table.log { table-layout: fixed; }
 table.log th:nth-child(1) { width: 235px; } table.log th:nth-child(2) { width: 120px; } table.log th:nth-child(3) { width: 96px; }
 table.log th:nth-child(4) { width: 150px; } table.log th:nth-child(5) { width: 170px; } table.log th:nth-child(7) { width: 170px; }
 table.log td { overflow-wrap: anywhere; } table.log td.kind { font-size: 12px; }
+table.log tr.row-signal td { color: var(--muted); }
+table.log tr.row-signal td.desc { color: inherit; }
+table.log tr.row-linkable { cursor: pointer; }
+table.log tr.row-related { outline: 2px solid #3d8bfd; outline-offset: -2px; background: rgba(61, 139, 253, .12); }
 .small { font-size: 12px; } .src { font-size: 12px; letter-spacing: .03em; }
 
 main.wide { grid-template-columns: minmax(0, 1fr); }
@@ -190,3 +194,46 @@ table.manual input[type=number] { width: 64px; }
 .toggle .tg.pending { animation: tg-pulse 0.8s ease-in-out infinite alternate; }
 .toggle .tg.held { background: var(--warn) !important; color: #2a1d00 !important; }
 @keyframes tg-pulse { from { opacity: 1; } to { opacity: .45; } }
+/* Solar tab (solar.js): monitoring only; not greyed by the controller link (own staleness) */
+svg.solar { width: 100%; height: auto; display: block; }
+.solar-head { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; padding: 4px 4px 8px; }
+.solar-h3 { margin: 10px 4px 6px; font-size: 14px; color: var(--muted); }
+.solar-flow { fill: none; stroke-width: 4; stroke-linejoin: round; stroke-dasharray: 12 8; }
+.solar-jump { fill: none; stroke-width: 4; }
+.flow-fwd { animation: solar-flow 1.2s linear infinite; }
+.flow-rev { animation: solar-flow 1.2s linear infinite reverse; }
+.flow-idle { stroke-dasharray: none; opacity: .45; }
+.flow-unknown { stroke: var(--unknown) !important; stroke-dasharray: 3 6; }
+@keyframes solar-flow { to { stroke-dashoffset: -20; } }
+@media (prefers-reduced-motion: reduce) { .flow-fwd, .flow-rev { animation: none; } }
+.pv-frame { fill: #12202f; stroke: var(--sym); stroke-width: 1.6; }
+.pv-cell { fill: #1d3a5c; stroke: #5d7fa6; stroke-width: 1; }
+.sun { fill: none; stroke: #d4a106; stroke-width: 2; }
+.bolt { fill: none; stroke: #2f7fd1; stroke-width: 2; stroke-linejoin: round; }
+.inv-box { fill: var(--panel-2); stroke: var(--sym); stroke-width: 1.6; }
+.batt-body { fill: none; stroke: var(--sym); stroke-width: 1.8; }
+.batt-fill { fill: rgba(47, 158, 87, .45); }
+.solar-val { fill: var(--text); font-size: 13.5px; }
+.solar-val.stale, .solar-total.stale { fill: var(--muted); }
+.solar-total { fill: var(--text); font-size: 15px; font-weight: 700; }
+.state.bad { fill: var(--crit); }
+.lamp.fault { fill: var(--crit); }
+.bad-text { color: var(--crit); }
+body.solar-stale #view-solar svg.solar { outline: 2px dashed var(--warn); }
+table.solar-table { width: 100%; border-collapse: collapse; }
+table.solar-table th, table.solar-table td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.solar-table th { color: var(--muted); font-weight: 500; white-space: nowrap; }
+table.solar-table td { white-space: nowrap; } table.solar-table td.small { white-space: normal; }
+body.stale .views:has(> #view-solar:not([hidden])) { outline: none; }   /* solar has its own staleness */
+/* Solar tab: electrical heating (solar permission) panel */
+.energy-panel { border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px 10px; margin: 4px 0 12px; }
+.energy-note { padding: 0 4px 8px; line-height: 1.4; }
+.energy-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 8px; margin-bottom: 10px; }
+.energy-tile { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }
+.energy-tile .energy-value { font-size: 22px; font-weight: 700; margin: 2px 0; }
+.energy-tile.good .energy-value { color: var(--on); }
+.energy-tile.bad .energy-value { color: var(--crit); }
+.energy-tile.stale .energy-value { color: var(--muted); }
+.energy-table { margin-bottom: 8px; }
+.good-text { color: var(--on); }
+table.solar-table td.wrap { white-space: normal; }

@@ -6,7 +6,7 @@
     "y4_closed_tolerance_percent": 3.0
   },
   "preheat": {
-    "max_duration_s": 10800.0
+    "max_duration_s": 18000.0
   },
   "model": {
     "target_log": 3.0,
@@ -93,6 +93,10 @@
     "queue_capacity": 5000,
     "write_batch_size": 200,
     "flush_interval_s": 1.0,
-    "retry_interval_s": 5.0
+    "retry_interval_s": 5.0,
+    "signal_validity_hold_s": 2.0,
+    "flow_activity_min_l_min": 0.2,
+    "flow_activity_min_pulse_hz": 2.0,
+    "flow_activity_hold_s": 3.0
   }
 }

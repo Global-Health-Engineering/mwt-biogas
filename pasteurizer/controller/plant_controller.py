@@ -5,7 +5,8 @@ Cycle (control spec section 2):
   2. faults      evaluate every condition -> FaultFlags
   3. process     state machine (treatment delegated to TreatmentLogic)
   4. requests    requested frame and permissions
-  5. arbiter     one complete frame (plant safe frame on a plant Level 3)
+  5. energy      solar permission for the electric heaters (energy.py)
+     arbiter     one complete frame (plant safe frame on a plant Level 3)
   6. write       outcome recorded; heartbeat only after a successful write
   7. persist, log, publish status
 
@@ -28,6 +29,7 @@ from pasteurizer.controller.state_machine import ProcessStateMachine
 from pasteurizer.controller.status import ControllerStatus, build_status
 from pasteurizer.controller.treatment import TreatmentLogic
 from pasteurizer.controller.y4_monitor import Y4Monitor
+from pasteurizer.energy import HEATERS, EnergyManager
 from pasteurizer.event_log import EventLog
 from pasteurizer.fault_manager import FaultManager
 from pasteurizer.model_interface import ModelResult, ModelSupervisor
@@ -65,7 +67,10 @@ class ShutdownResult:
 class PlantController:
     def __init__(self, config, *, reader, writer, store, event_log: EventLog | None = None,
                  clock: Clock | None = None, simulated_io=False, heartbeat=None,
-                 battery_percent=lambda: None, publish=None):
+                 solar=None, publish=None):
+        """solar: object with view() -> SolarLink view (pasteurizer/solar.py);
+        None: no inverter data, so no solar permission for the electric heaters
+        (unless energy.solar_permission_enabled is false)."""
         self.cfg = config
         self.publish = publish          # e.g. StatusPublisher.publish (reference swap)
         self.clock = clock if clock is not None else MonotonicClock()
@@ -76,7 +81,7 @@ class PlantController:
         self.outputs_enabled = _outputs_enabled(writer)
         self.log.data_source = _data_source(reader)
         self.heartbeat = heartbeat
-        self.battery_percent = battery_percent
+        self.solar = solar
         now = self.clock.monotonic()
         control = config.control
 
@@ -95,8 +100,10 @@ class PlantController:
                                            start_time=now)
         self.requests = OutputRequestBuilder(config)
         self.arbiter = OutputArbiter(config, start_time=now)
+        self.energy = EnergyManager(config.arbiter.energy, start_time=now)
         self.recorder = CycleRecorder(self.log, self.faults, control.logging,
-                                      start_time=now, outputs_enabled=self.outputs_enabled)
+                                      start_time=now, outputs_enabled=self.outputs_enabled,
+                                      config=config)
         self.keeper = StateKeeper(store, self.log)
         self.commands = OperatorCommands(
             process=self.process, treatment=self.treatment, faults=self.faults,
@@ -195,11 +202,19 @@ class PlantController:
 
     # ------------------------------------------------------------------
     def cycle(self) -> ControllerStatus:
-        now = self.clock.monotonic()
         self.cycle_count += 1
+        self.log.cycle = self.cycle_count       # events of this scan carry its number
+        try:
+            return self._cycle()
+        finally:
+            self.log.cycle = None
+
+    def _cycle(self) -> ControllerStatus:
+        now = self.clock.monotonic()
         self.faults.start_cycle(now)
 
         inputs = self.inputs.read(now)
+        self.recorder.signals(inputs)
         flags = self.evaluator.evaluate(
             inputs, self.process,
             system=self._system_health(),
@@ -219,10 +234,16 @@ class PlantController:
             trip=flags.summary.trip,
             release_permitted=requests.release_permitted,
             fallback_path=self.process.path == TreatmentPath.FALLBACK)
+        solar_view = self._solar_view()
+        written = self.arbiter.last_written
+        energy, energy_events = self.energy.update(
+            solar_view, None if written is None else
+            {name: getattr(written, name) for name in HEATERS}, now)
+        for kind, data in energy_events:
+            self.log.record(kind, **data)
         result = self.arbiter.arbitrate(
             requests.commands, requests.permissions, indicators, now,
-            battery_percent=self.battery_percent(),
-            plant_safe=flags.summary.plant_trip)
+            energy=energy, plant_safe=flags.summary.plant_trip)
 
         write_ok = self._write(result.commands, now)
         self.recorder.write_result(result.commands, write_ok, indicators,
@@ -238,8 +259,10 @@ class PlantController:
             lamp_modes=self.arbiter.indicator_modes(
                 indicators, plant_safe=flags.summary.plant_trip),
             model_enabled=self.cfg.control.model_control_enabled,
-            outputs_enabled=self.outputs_enabled)
-        self.recorder.requested(self.status)
+            outputs_enabled=self.outputs_enabled,
+            energy={"status": energy.to_dict(), "solar": solar_view,
+                    "settings": self._energy_settings()})
+        self.recorder.requested(self.status, requests.explanations)
         self.recorder.model(inputs)
         self.recorder.periodic(inputs, self.status)
         if self.publish is not None:
@@ -250,6 +273,28 @@ class PlantController:
         return self.status
 
     # ------------------------------------------------------------------
+    def _solar_view(self):
+        if self.solar is None:
+            return None
+        try:
+            return self.solar.view()
+        except Exception as error:      # never stops the scan; counts as no data
+            return {"enabled": False, "reason": f"Solar view failed: {error}"}
+
+    def _energy_settings(self) -> dict:
+        e = self.cfg.arbiter.energy
+        return {"solar_permission_enabled": e.solar_permission_enabled,
+                "heater_power_w": dict(e.heater_power_w),
+                "start_surplus_fraction": e.start_surplus_fraction,
+                "stop_surplus_fraction": e.stop_surplus_fraction,
+                "start_delay_s": e.start_delay_s, "stop_delay_s": e.stop_delay_s,
+                "soc_start_min_percent": e.soc_start_min_percent,
+                "soc_stop_at_percent": e.soc_stop_at_percent,
+                "communication_timeout_s": e.communication_timeout_s,
+                "preheat_max_heating_s": self.cfg.control.preheat.max_duration_s,
+                "preheat_heating_s": round(self.process.preheat_heated_s, 1)
+                if self.process.state.value == "PREHEAT_3KW" else None}
+
     def _system_health(self) -> SystemHealth:
         health = SystemHealth(
             watchdog_restart=self._watchdog_restart,

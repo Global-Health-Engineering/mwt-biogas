@@ -27,6 +27,7 @@ from pasteurizer.operator_interface import Role, User
 from pasteurizer.controller import PlantController
 from pasteurizer.persistence import MemoryStore
 from pasteurizer.simulated_io import PlantParameters, SimulatedPlant
+from pasteurizer.simulated_solar import SimulatedSolar
 from pasteurizer.watchdog import SoftwareWatchdog
 
 OPERATOR = User("op", Role.OPERATOR)
@@ -35,6 +36,11 @@ CYCLE = 0.2
 
 # Fast bath: ~1 K every 5 s at 3 kW (PRETEND, keeps scenarios short).
 FAST = dict(bath_heat_capacity_j_k=16_000.0)
+
+# Every Sim has a simulated inverter pair (sunny: 4 kW PV, 80 % SOC) and, so
+# that scenarios about other things are not delayed, no solar start delay.
+# The energy scenarios (tools/scenarios/energy.py) set their own values.
+SOLAR_DEFAULTS = {"energy.start_delay_s": 0.0}
 
 
 def make_config(control=None, arbiter=None, flow_confirmed=True):
@@ -51,6 +57,7 @@ def make_config(control=None, arbiter=None, flow_confirmed=True):
         options["pulses_per_litre"] = 2000.0         # PRETEND for simulation
         options["calibration_confirmed"] = flow_confirmed
     (tmp / "flow_settings.json").write_text(json.dumps(flows))
+    arbiter = {**SOLAR_DEFAULTS, **(arbiter or {})}
     for name, changes in (("control_settings.json", control),
                           ("arbiter_settings.json", arbiter)):
         if changes:
@@ -91,7 +98,7 @@ class TestSqliteStore(SqliteStore):
 
 class Sim:
     def __init__(self, *, control=None, arbiter=None, params=None, store=None,
-                 simulated_io=True, bath=None, battery=None, start_time=1000.0,
+                 simulated_io=True, bath=None, solar=None, start_time=1000.0,
                  plant=None, clock=None, history=None, database=None, background=False,
                  flow_confirmed=True):
         self.config = make_config(control, arbiter, flow_confirmed)
@@ -116,14 +123,15 @@ class Sim:
             self.historian.start()
         self.log = EventLog(self.historian, clock=self.clock, wall_clock=self.wall,
                             clock_sync=lambda: self.clock_sync)
-        self.battery = battery
+        # Simulated inverters; their load includes the heaters the plant has on.
+        self.solar = solar if solar is not None else SimulatedSolar(self.plant)
         self.watchdog = SoftwareWatchdog(self.config.control.watchdog.heartbeat_timeout_s,
                                          self._watchdog_trip)
         self.ctl = PlantController(self.config, reader=self.plant, writer=self.plant,
                                    store=self.store, event_log=self.log, clock=self.clock,
                                    simulated_io=simulated_io,
                                    heartbeat=self.watchdog.heartbeat,
-                                   battery_percent=lambda: self.battery)
+                                   solar=self.solar)
         self.status = None
         self.model_sequence = 0
         self.model_template = None
@@ -144,6 +152,7 @@ class Sim:
             kwargs.setdefault("database", self.database)
         else:
             kwargs.setdefault("history", self.history)
+        kwargs.setdefault("solar", self.solar)
         sim = Sim(store=self.store, plant=self.plant, clock=self.clock, **kwargs)
         sim.wall_offset = self.wall_offset
         return sim
