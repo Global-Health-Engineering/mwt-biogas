@@ -221,7 +221,17 @@ class PlantController:
             manual_heating=self._manual_heating(inputs),
             transfer_requested=self.requests.transfer_requested,
             last_written=self.arbiter.last_written)
-        self.process.step(inputs, flags, self.arbiter.last_written)
+        # Solar permission first: the state machine waits for it before preheat.
+        solar_view = self._solar_view()
+        written = self.arbiter.last_written
+        energy, energy_events = self.energy.update(
+            solar_view, None if written is None else
+            {name: getattr(written, name) for name in HEATERS}, now)
+        for kind, data in energy_events:
+            self.log.record(kind, **data)
+        self.process.step(inputs, flags, self.arbiter.last_written,
+                          solar_3kw=(energy.permitted(["heater_3kw"]),
+                                     energy.reason(["heater_3kw"])))
         flags = self.evaluator.flags(inputs)     # the step may latch a fault
 
         requests = self.requests.build(inputs, flags, self.process, self.manual,
@@ -234,13 +244,6 @@ class PlantController:
             trip=flags.summary.trip,
             release_permitted=requests.release_permitted,
             fallback_path=self.process.path == TreatmentPath.FALLBACK)
-        solar_view = self._solar_view()
-        written = self.arbiter.last_written
-        energy, energy_events = self.energy.update(
-            solar_view, None if written is None else
-            {name: getattr(written, name) for name in HEATERS}, now)
-        for kind, data in energy_events:
-            self.log.record(kind, **data)
         result = self.arbiter.arbitrate(
             requests.commands, requests.permissions, indicators, now,
             energy=energy, plant_safe=flags.summary.plant_trip)
@@ -293,7 +296,8 @@ class PlantController:
                 "communication_timeout_s": e.communication_timeout_s,
                 "preheat_max_heating_s": self.cfg.control.preheat.max_duration_s,
                 "preheat_heating_s": round(self.process.preheat_heated_s, 1)
-                if self.process.state.value == "PREHEAT_3KW" else None}
+                if self.process.state.value in ("PREHEAT_3KW", "WAITING_FOR_SOLAR")
+                else None}
 
     def _system_health(self) -> SystemHealth:
         health = SystemHealth(

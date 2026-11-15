@@ -78,6 +78,7 @@ function renderHeader() {
     const mode = isLive() && modes ? modes[colour] : "unknown";
     el.className = `plant-lamp lamp-${colour} mode-${mode}${isShadow(st) ? " cmd-only" : ""}`;
     let label = text + (mode === "blinking" ? " (blinking)" : mode === "off" ? " off" : "");
+    if (colour === "green" && mode === "double_blink") label = "Waiting for solar (green double blink)";
     if (colour === "red" && mode === "blinking") label = "Fallback path (red blinking)";
     if (mode === "unknown") label = `${text}: unknown`;
     if (isShadow(st) && mode !== "unknown") label += " — command, not written";
@@ -164,6 +165,7 @@ function treatmentWord(st) {
   if (s === "TRIPPED") return ["Tripped", "crit"];
   if (s === "MODEL_TREATMENT" || s === "FALLBACK_TREATMENT") return st.release_permitted ? ["Treatment enabled", "ok"] : ["Opening (Y3 delay)", "wait"];
   if (s === "READY" || s === "FALLBACK_QUALIFY") return ["Qualifying", "wait"];
+  if (s === "WAITING_FOR_SOLAR") return ["Waiting for solar power to preheat", "wait"];
   if (s === "PREHEAT_3KW" || s === "HEAT_UP") return ["Heating, waiting to qualify", "wait"];
   if (s === "STOPPING") return ["Stopping", "wait"];
   return ["Waiting (idle)", "idle"];

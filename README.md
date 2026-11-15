@@ -258,9 +258,19 @@ Rules (`pasteurizer/energy.py`, settings in `arbiter_settings.json` `energy`):
 - **The biogas heating** (`heating_circulation`) is never gated.
 - **Applies in AUTO and MANUAL.** `energy.solar_permission_enabled: false`
   switches the rule off (e.g. commissioning at night).
+- **WAITING_FOR_SOLAR**: a cold start (AUTO, every start check passed, PT5
+  below the cold-start limit) without solar permission for the 3 kW waits
+  in this state instead of PREHEAT_3KW; nothing heats and the transition
+  reason names the missing surplus or SOC. It moves to PREHEAT_3KW once the
+  3 kW is permitted, and back when the permission ends during preheat. It
+  leaves like any active state (STOP, selector, faults, supply) and goes to
+  HEAT_UP if PT5 reaches the preheat limit anyway. A warm start needs no
+  solar. Green lamp: double blink (on 0.3 s, off 0.3 s, on 0.3 s, off 2 s;
+  `arbiter_settings.json` `indicators.solar_wait_pulse_seconds` /
+  `solar_wait_pause_seconds`; the pulse must stay longer than the 0.2 s scan).
 - **Preheat timeout** (`control_settings.json` `preheat.max_duration_s`, now
-  5 h) counts only the time the 3 kW was written on: waiting for the sun
-  never trips the plant.
+  5 h) counts only the time the 3 kW was written on, summed over one cold
+  start including its solar waits: waiting for the sun never trips the plant.
 - Event log: `ENERGY_PERMISSION` on every change (mode, reason, surplus, SOC).
 - Battery power: positive = discharging (validated with the 1 kW heater
   test); negative is shown as charging, "sign unverified", until
@@ -405,6 +415,7 @@ What is running on the RevPi (read-only checks):
     python3 tools/control_scenarios.py 97 98 99 100 101 102 103 104 105 # requests, drain, stops, crashes, flow guard
     python3 tools/control_scenarios.py 110 111 112 113                # inverter reading, Solar tab data
     python3 tools/control_scenarios.py 114 115 116 117 118 119 120 121 # solar permission (121: fake Modbus inverters)
+    python3 tools/control_scenarios.py 122 123                        # WAITING_FOR_SOLAR, green double blink
     python3 tools/control_scenarios.py 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68   # historian only
     python3 tools/simulate_plant.py         # timeline of a simulated cold start
     python3 tools/simulate_plant.py --minutes 20 --historian logs/simulation.sqlite

@@ -32,6 +32,8 @@
   "compressor_enabled": false,
   "cabinet_fan_disable_allowed": false,
   "indicators": {
-    "heat_up_blink_period_seconds": 1.0
+    "heat_up_blink_period_seconds": 1.0,
+    "solar_wait_pulse_seconds": 0.3,
+    "solar_wait_pause_seconds": 2.0
   }
 }

@@ -257,7 +257,7 @@ def s119():
     assert note.remaining_s == 120 and "permitted in 120 s" in note.message
 
 
-@scenario(120, "Energy in the controller: night start waits without tripping, sun heats, clouds stop, events, 5 h counts heating only")
+@scenario(120, "Energy in the controller: night start WAITING_FOR_SOLAR without tripping, sun heats, clouds wait again, 5 h counts heating only")
 def s120():
     # Long preheat limit counted as heating time; PRETEND 300 s for the check.
     sim = Sim(params=dict(bath_heat_capacity_j_k=2_000_000.0), bath=20.0,
@@ -265,22 +265,23 @@ def s120():
               arbiter={"energy.start_delay_s": 120.0, "energy.stop_delay_s": 120.0})
     sim.solar.pv_w = 0.0                                        # night (AUTO is the default)
     sim.run(25)
-    assert sim.status.state == "PREHEAT_3KW", sim.status.state
-    assert sim.status.requested["heater_3kw"] and not sim.out("heater_3kw")
-    note = [n for n in sim.status.arbitration_notes if n["output"] == "heater_3kw"][0]
-    assert note["rule"] == "ENERGY_SOLAR" and "< 600 W" in note["message"]
+    assert sim.status.state == "WAITING_FOR_SOLAR", sim.status.state
+    assert "< 600 W" in sim.status.state_reason, sim.status.state_reason
+    assert not sim.status.requested["heater_3kw"] and not sim.out("heater_3kw")
+    assert sim.status.lamp_modes["green"] == "double_blink"
     # A night far longer than the preheat limit: no trip (heater never on).
     sim.run(900)
-    assert sim.status.state == "PREHEAT_3KW" and not sim.alarm("PREHEAT_TIMEOUT")
+    assert sim.status.state == "WAITING_FOR_SOLAR" and not sim.alarm("PREHEAT_TIMEOUT")
     energy = sim.status.energy
     assert energy["status"]["available_heating_w"] == 0 and energy["solar"]["inverters"]
     assert energy["settings"]["preheat_heating_s"] == 0.0
     # Sunrise: 600 W surplus held for 120 s, then the 3 kW runs.
     sim.solar.pv_w = 1000.0                                     # 700 W surplus
     sim.run(100)
-    assert not sim.out("heater_3kw")
+    assert not sim.out("heater_3kw") and sim.status.state == "WAITING_FOR_SOLAR"
     sim.run(25)
-    assert sim.out("heater_3kw")
+    assert sim.out("heater_3kw") and sim.status.state == "PREHEAT_3KW"
+    assert sim.status.lamp_modes["green"] == "blinking"
     # With the heater on, the measured load includes its 3 kW: no self-blocking.
     assert sim.status.energy["status"]["surplus_w"] == 700
     granted = [e["data"] for e in sim.events("ENERGY_PERMISSION") if e["data"]["permitted"]]
@@ -290,10 +291,11 @@ def s120():
     sim.run(100)
     assert sim.out("heater_3kw")
     sim.run(25)
-    assert not sim.out("heater_3kw")
+    assert not sim.out("heater_3kw") and sim.status.state == "WAITING_FOR_SOLAR"
     assert not [e for e in sim.events("ENERGY_PERMISSION")
                 if e["data"]["mode"] == "heater_3kw"][-1]["data"]["permitted"]
-    # Heating time counts only while the 3 kW was written on: about 120 s so far.
+    # Heating time counts only while the 3 kW was written on: about 120 s so far,
+    # and it is kept while waiting for the sun again.
     heated = sim.ctl.process.preheat_heated_s
     assert 100 < heated < 140, heated
     # The preheat timeout still trips after 300 s of real heating.

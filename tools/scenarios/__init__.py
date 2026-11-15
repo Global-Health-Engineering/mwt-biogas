@@ -14,6 +14,7 @@ from scenarios import (  # noqa: F401  (imported for registration)
     shadow,
     signal_log,
     solar,
+    solar_wait,
     energy,
     startup_heating,
     treatment,

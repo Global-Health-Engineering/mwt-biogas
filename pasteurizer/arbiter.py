@@ -29,8 +29,9 @@ Rules, applied in this order every cycle (settings in arbiter_settings.json):
 7. Indicators are generated here, never passed through (spec section 11):
    green steady only with treatment release (permission held and Y4
    commanded open), blinking in heat-up, qualification and during the Y3
-   opening delay; red steady for a Level 3, blinking on the fallback path;
-   yellow for any Level 1/2 alarm.
+   opening delay; green double blink (two short pulses, then a pause) while
+   WAITING_FOR_SOLAR; red steady for a Level 3, blinking on the fallback
+   path; yellow for any Level 1/2 alarm.
 
 A plant-wide Level 3 replaces all of this with the plant safe command frame
 (spec section 12): everything off, Y1/Y2/Y3 closed, Y4 0 %, fan disable
@@ -346,6 +347,8 @@ class OutputArbiter:
         elif state in HEAT_UP_STATES or state in TREATMENT_STATES:
             # Treatment states without release = Y3 opening delay.
             green = "blinking"
+        elif state == ProcessState.WAITING_FOR_SOLAR:
+            green = "double_blink"
         else:
             green = "off"
         red = "blinking" if inputs.fallback_path and state in (
@@ -355,10 +358,18 @@ class OutputArbiter:
         ) else "off"
         return {"green": green, "yellow": yellow, "red": red}
 
+    def double_blink_on(self, now: float) -> bool:
+        """Two pulses (on, off, on), then the pause, repeating. Each pulse and
+        gap is longer than the scan cycle, so every one reaches the lamp."""
+        pulse = self.settings.solar_wait_pulse_seconds
+        phase = now % (3 * pulse + self.settings.solar_wait_pause_seconds)
+        return phase < pulse or 2 * pulse <= phase < 3 * pulse
+
     def _indicators(self, inputs: IndicatorInputs, now: float) -> dict:
         period = self.settings.heat_up_blink_period_seconds
         blink_on = (now % period) < period / 2
-        lamp = {"off": False, "steady": True, "blinking": blink_on}
+        lamp = {"off": False, "steady": True, "blinking": blink_on,
+                "double_blink": self.double_blink_on(now)}
         modes = self.indicator_modes(inputs)
         return {
             "light_green": lamp[modes["green"]],

@@ -125,6 +125,10 @@ class ArbiterSettings:
     compressor_enabled: bool
     cabinet_fan_disable_allowed: bool
     heat_up_blink_period_seconds: float
+    # WAITING_FOR_SOLAR: green pulse / gap length and the pause after two pulses.
+    # The pulse must be longer than the scan cycle (0.2 s) to always be written.
+    solar_wait_pulse_seconds: float
+    solar_wait_pause_seconds: float
 
 
 @dataclass(frozen=True)
@@ -458,7 +462,8 @@ def _arbiter(data, where):
                             ("open_before_control_valve_seconds",),
                             f"{where}.isolation_valve")
     indicators = _exact_keys(data["indicators"],
-                             ("heat_up_blink_period_seconds",),
+                             ("heat_up_blink_period_seconds",
+                              "solar_wait_pulse_seconds", "solar_wait_pause_seconds"),
                              f"{where}.indicators")
 
     heater = _text(preheat["heater"], f"{where}.preheat_exclusion.heater")
@@ -492,6 +497,14 @@ def _arbiter(data, where):
             indicators["heat_up_blink_period_seconds"],
             f"{where}.indicators.heat_up_blink_period_seconds",
             minimum=0.2, maximum=10.0),
+        solar_wait_pulse_seconds=_number(
+            indicators["solar_wait_pulse_seconds"],
+            f"{where}.indicators.solar_wait_pulse_seconds",
+            minimum=0.25, maximum=2.0),
+        solar_wait_pause_seconds=_number(
+            indicators["solar_wait_pause_seconds"],
+            f"{where}.indicators.solar_wait_pause_seconds",
+            minimum=0.5, maximum=10.0),
     )
 
 

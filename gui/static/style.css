@@ -48,6 +48,9 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px
 .mode-off { opacity: .25; } .mode-unknown { background: var(--unknown) !important; opacity: .6; }
 .lamp-green { background: #2ecc71; } .lamp-yellow { background: #f1c40f; } .lamp-red { background: #e74c3c; }
 .mode-blinking { animation: blink 1s steps(1) infinite; }
+/* WAITING_FOR_SOLAR: on 0.3 s, off 0.3 s, on 0.3 s, off 2 s (as the lamp). */
+.mode-double_blink { animation: double-blink 2.9s steps(1) infinite; }
+@keyframes double-blink { 0% { opacity: 1; } 10.34% { opacity: .2; } 20.69% { opacity: 1; } 31.03% { opacity: .2; } }
 @keyframes blink { 50% { opacity: .2; } }
 .gui-error { color: var(--crit); padding: 0 14px; }
 

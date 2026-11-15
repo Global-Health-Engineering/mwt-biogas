@@ -1,8 +1,12 @@
 """Process state machine (control spec section 4).
 
 Decides the plant state once per cycle from the cycle inputs and fault
-flags. Treatment states are delegated to TreatmentLogic, which returns a
-Transition; every transition is logged with its reason.
+flags. A cold start without solar permission for the 3 kW heater waits in
+WAITING_FOR_SOLAR (nothing heats) and preheats once the permission is there;
+losing the permission during preheat returns to WAITING_FOR_SOLAR. The
+preheat heating time is kept across these changes. Treatment states are
+delegated to TreatmentLogic, which returns a Transition; every transition is
+logged with its reason.
 """
 
 from pasteurizer.controller.conditions import (
@@ -20,6 +24,9 @@ from pasteurizer.process_state import (
     TreatmentPath,
 )
 
+# One cold start: waiting for solar and preheating share the heating time.
+PREHEAT_STATES = (P.WAITING_FOR_SOLAR, P.PREHEAT_3KW)
+
 
 class ProcessStateMachine:
     def __init__(self, config, treatment: TreatmentLogic, faults, log, *, start_time):
@@ -34,10 +41,11 @@ class ProcessStateMachine:
         self.path: TreatmentPath | None = None
         self.stop_hold = False
         self.preheat_since: float | None = None
-        # Time with the 3 kW heater written on in this PREHEAT_3KW stay. The
-        # preheat timeout counts this, not the waiting for solar permission.
+        # Time with the 3 kW heater written on in this cold start (PREHEAT_3KW,
+        # also across WAITING_FOR_SOLAR). The preheat timeout counts this only.
         self.preheat_heated_s = 0.0
         self._preheat_tick: float | None = None
+        self._solar_3kw = (True, "")
         self.dwell = Persistence()
         self.supply_lost = Persistence()
 
@@ -59,15 +67,16 @@ class ProcessStateMachine:
             self.treatment.end()
             if transition.interruption:
                 self.treatment.record_interruption(now)
-        if previous == P.PREHEAT_3KW:
-            self.preheat_since = None
+        if previous in PREHEAT_STATES and state not in PREHEAT_STATES:
+            self.preheat_since = None           # this cold start is over
 
     def _enter(self, state, transition, now):
-        if state == P.PREHEAT_3KW:
-            self.preheat_since = now
+        if state in PREHEAT_STATES and self.preheat_since is None:
+            self.preheat_since = now            # new cold start: heating time from 0
             self.preheat_heated_s = 0.0
+        if state == P.PREHEAT_3KW:
             self._preheat_tick = now
-        if state in (P.IDLE, P.STOPPING, P.TRIPPED, P.PREHEAT_3KW):
+        if state in (P.IDLE, P.STOPPING, P.TRIPPED) or state in PREHEAT_STATES:
             self.path = None
         if state not in ACTIVE_STATES:
             self.supply_lost.reset()
@@ -89,7 +98,10 @@ class ProcessStateMachine:
                 self.preheat_heated_s += max(0.0, now - self._preheat_tick)
         self._preheat_tick = now
 
-    def step(self, inputs, flags, last_written):
+    def step(self, inputs, flags, last_written, *, solar_3kw=(True, "")):
+        """solar_3kw: (permitted, reason) of the solar permission for the 3 kW
+        heater in this cycle (energy.py; always permitted when the rule is off)."""
+        self._solar_3kw = solar_3kw
         now = inputs.now
         self._count_preheat(now, last_written)
         state = self.state
@@ -121,7 +133,13 @@ class ProcessStateMachine:
         if not start_permitted(self.cfg, inputs, flags, stop_hold=self.stop_hold):
             return
         if inputs.pt5 < self.cfg.startup.cold_start_below_celsius:
-            self._to(P.PREHEAT_3KW, "Cold start", inputs.now)
+            permitted, reason = self._solar_3kw
+            if permitted:
+                self._to(P.PREHEAT_3KW, "Cold start", inputs.now)
+            else:
+                self._to(P.WAITING_FOR_SOLAR,
+                         f"Cold start; not enough solar power for the 3 kW heater: {reason}",
+                         inputs.now)
         else:
             self._to(P.HEAT_UP, "Warm start, preheat skipped", inputs.now)
 
@@ -136,7 +154,7 @@ class ProcessStateMachine:
         if lost >= self.cs.treatment_stop.supply_wait_s:
             self._to(P.STOPPING, "Supply lost for too long", now)
             return
-        if state == P.PREHEAT_3KW:
+        if state in PREHEAT_STATES:
             self._preheat(inputs)
         elif state in TREATMENT_STATES:
             transition = self.treatment.step(state, inputs, flags, last_written)
@@ -149,6 +167,13 @@ class ProcessStateMachine:
         complete = self.cfg.startup.preheat_complete_at_celsius
         if inputs.pt5 is not None and inputs.pt5 >= complete:
             self._to(P.HEAT_UP, "Preheat complete", inputs.now)
+            return
+        permitted, reason = self._solar_3kw
+        if self.state == P.WAITING_FOR_SOLAR and permitted:
+            self._to(P.PREHEAT_3KW, "Solar power available for the 3 kW heater", inputs.now)
+        elif self.state == P.PREHEAT_3KW and not permitted:
+            self._to(P.WAITING_FOR_SOLAR,
+                     f"Not enough solar power for the 3 kW heater: {reason}", inputs.now)
 
     # HEAT_UP / READY / FALLBACK_QUALIFY ----------------------------------
     def _select_path(self, inputs, flags):
