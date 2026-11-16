@@ -143,6 +143,12 @@ def describe(kind, data) -> tuple[str, str, list, str | None]:
     elif kind == "LOG_GAP":
         text = (f"Historian gap ({data.get('cause')}): {data.get('dropped_events')} events, "
                 f"{data.get('dropped_samples')} samples dropped")
+    elif kind == "BIOGAS_HEAT":
+        delta = data.get("delta_c")
+        shown = "invalid" if delta is None else f"{delta:.1f} °C"
+        text = f"Biogas heat: {data.get('label')} (PT6 - PT5 {shown}): {data.get('reason')}"
+        return ("WARNING" if data.get("status") == "NOT_DETECTED" else "INFO", text,
+                ["heating_circulation"], None)
     elif kind == "MODEL_STATUS":
         text = f"Model {data.get('status')}, usable {data.get('usable')}: {data.get('reason')}"
     elif kind == "CONTROLLER_START":

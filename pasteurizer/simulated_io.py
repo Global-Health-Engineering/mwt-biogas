@@ -168,7 +168,10 @@ class SimulatedPlant:
             "PT3_B4": self.pt3_c(),
             "PT4_B5": 35.0,
             "PT5_B6": self.bath_c,
-            "PT6_B7": self.bath_c + (3.0 if circulation else 0.0),
+            # Heating water 3 K above the bath while the burner delivers heat
+            # (gas-off test: biogas_power_w = 0). The burner thermostat
+            # cut-out is not modelled here.
+            "PT6_B7": self.bath_c + (3.0 if circulation and p.biogas_power_w > 0 else 0.0),
         }
         result = {}
         for name, value in values.items():

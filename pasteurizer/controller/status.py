@@ -84,6 +84,10 @@ class ControllerStatus:
     # What the electric heating waits for (solar probe phase, retry delay,
     # missing PV or SOC), for the status line; "" when nothing waits.
     heating_wait: str = ""
+    # AUTO heating diagnostics: {"preheat_circulation": pulse status in
+    # PREHEAT_3KW or None, "biogas_heat": BiogasHeatStatus (status CHECKING /
+    # DETECTED / NOT_DETECTED, None when not evaluated)}.
+    heating: dict = field(default_factory=dict)
 
 
 def _iso(epoch) -> str:
@@ -127,7 +131,8 @@ def model_summary(inputs, enabled: bool) -> dict:
 def build_status(*, cycle, inputs, process, requests, result, write_ok,
                  keeper, faults, manual, historian=None, identity=None,
                  lamp_modes=None, model_enabled=False,
-                 outputs_enabled=True, energy=None, heating_wait="") -> ControllerStatus:
+                 outputs_enabled=True, energy=None, heating_wait="",
+                 heating=None) -> ControllerStatus:
     """write_ok: the output layer accepted the frame. It counts as written only
     when outputs are enabled; a shadow writer's acceptance is never a write."""
     frame = result.commands
@@ -178,4 +183,5 @@ def build_status(*, cycle, inputs, process, requests, result, write_ok,
         output_write=output_write,
         energy=energy or {},
         heating_wait=heating_wait,
+        heating=heating or {},
     )

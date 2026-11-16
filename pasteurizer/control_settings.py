@@ -39,6 +39,35 @@ class PreheatSettings:
 
 
 @dataclass(frozen=True)
+class PreheatCirculationSettings:
+    """Heating-water circulation pulses in a cold start (with the 3 kW in
+    PREHEAT_3KW; PT5 refresh checks only in WAITING_FOR_SOLAR).
+
+    Timing follows the written pump output (no running feedback). Starting the
+    pump also calls for burner ignition on this installation.
+    """
+    trigger_delta_c: float = num(positive=True, maximum=50.0)   # PT6 - PT5 starts a pulse
+    min_run_s: float = num(positive=True, maximum=3600.0)       # pulse length; PT5 refreshed after it
+    min_off_s: float = num(0.0, 3600.0)                         # after every pulse
+    # Start to start, all triggers: limits burner ignition calls (burner's
+    # permitted cycling; 300 s = at most 12 pulse starts per hour).
+    min_start_interval_s: float = num(0.0, 86400.0)
+    max_idle_s: float = num(positive=True, maximum=86400.0)     # mixing pulse without the trigger
+
+
+@dataclass(frozen=True)
+class BiogasHeatSettings:
+    """Diagnostic only (never blocks): biogas heat input seen as PT6 - PT5 while
+    the heating-water circulation is written on. No burner enable or flame
+    feedback exists on the RevPi."""
+    startup_delay_s: float = num(0.0, 3600.0)       # circulation on before judging
+    delta_min_c: float = num(positive=True, maximum=50.0)
+    hold_s: float = num(0.0, 3600.0)                # delta must hold this long
+    observation_s: float = num(positive=True, maximum=86400.0)  # initial check window
+    loss_s: float = num(positive=True, maximum=86400.0)         # sustained loss after detection
+
+
+@dataclass(frozen=True)
 class ModelSettings:
     target_log: float = num(positive=True, maximum=12.0)
     operating_reserve_log: float = num(0.0, 6.0)
@@ -174,6 +203,8 @@ class ControlSettings:
     fallback_enabled: bool = flag()
     start: StartSettings = field(default=MISSING)
     preheat: PreheatSettings = field(default=MISSING)
+    preheat_circulation: PreheatCirculationSettings = field(default=MISSING)
+    biogas_heat: BiogasHeatSettings = field(default=MISSING)
     model: ModelSettings = field(default=MISSING)
     flow_pi: FlowPISettings = field(default=MISSING)
     fallback: FallbackSettings = field(default=MISSING)
@@ -190,6 +221,8 @@ class ControlSettings:
 GROUPS = {
     "start": StartSettings,
     "preheat": PreheatSettings,
+    "preheat_circulation": PreheatCirculationSettings,
+    "biogas_heat": BiogasHeatSettings,
     "model": ModelSettings,
     "flow_pi": FlowPISettings,
     "fallback": FallbackSettings,
@@ -275,6 +308,16 @@ def _cross_check(s: ControlSettings, where):
     f = s.faults
     if f.overtemperature_reset_below_c >= f.overtemperature_trip_c:
         raise ControlSettingsError(f"{where}.faults: reset temperature must be below trip")
+    pc = s.preheat_circulation
+    if pc.max_idle_s < pc.min_off_s:
+        raise ControlSettingsError(
+            f"{where}.preheat_circulation: max_idle_s must be at least min_off_s"
+        )
+    b = s.biogas_heat
+    if b.observation_s < b.startup_delay_s + b.hold_s:
+        raise ControlSettingsError(
+            f"{where}.biogas_heat: observation_s must cover startup_delay_s + hold_s"
+        )
     fb = s.fallback
     if not fb.min_opening_percent <= fb.start_opening_percent <= fb.max_opening_percent:
         raise ControlSettingsError(

@@ -6,6 +6,7 @@ from scenarios.harness import (
     FAST,
     OPERATOR,
     Sim,
+    overtemperature_offset,
     scenario,
     state_is,
     to_fallback_treatment,
@@ -107,7 +108,7 @@ def s48():
 def s52():
     sim = Sim(params=FAST, bath=70.0)
     sim.run(5)
-    sim.plant.faults.temperature_offsets["PT6_B7"] = 30.0
+    sim.plant.faults.temperature_offsets["PT6_B7"] = overtemperature_offset(sim)
     sim.run(0.6)
     assert sim.state == "TRIPPED"
     sim.plant.mode = Mode.MANUAL

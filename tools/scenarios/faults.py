@@ -6,6 +6,7 @@ from scenarios.harness import (
     FAST,
     OPERATOR,
     Sim,
+    overtemperature_offset,
     scenario,
     state_is,
     to_fallback_treatment,
@@ -45,7 +46,7 @@ def s12():
 def s13():
     sim = Sim(params=FAST, bath=70.0)
     sim.run(5)
-    sim.plant.faults.temperature_offsets["PT6_B7"] = 30.0
+    sim.plant.faults.temperature_offsets["PT6_B7"] = overtemperature_offset(sim)
     sim.run(0.4)
     assert sim.state == "TRIPPED" and sim.out("light_red") and not sim.out("light_green")
     assert not sim.out("heating_circulation")
@@ -99,7 +100,7 @@ def s16():
 def s23():
     sim = Sim(params=FAST, bath=70.0)
     sim.run(5)
-    sim.plant.faults.temperature_offsets["PT6_B7"] = 30.0
+    sim.plant.faults.temperature_offsets["PT6_B7"] = overtemperature_offset(sim)
     sim.run(1)
     assert sim.state == "TRIPPED"
     sim.plant.faults.temperature_offsets.clear()

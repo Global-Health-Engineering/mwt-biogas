@@ -3,7 +3,11 @@
 Independent equipment (transfer pumps, manhole drain, overflow valves) has
 its own level logic in every mode. Process equipment (heaters, circulation,
 Y3/Y4) follows the plant state in AUTO and expiring commissioning requests
-in MANUAL. Permissions only allow requests; the arbiter decides the frame.
+in MANUAL. In AUTO the circulation pulses in a cold start (with the 3 kW in
+PREHEAT_3KW; only PT5 refresh checks in WAITING_FOR_SOLAR) and runs
+continuously in the second stage; starting the pump also calls for burner
+ignition on this installation. Permissions only allow
+requests; the arbiter decides the frame.
 
 Every command also gets an explanation (reason and blocking protections) for
 the event log; explanations never change what is requested.
@@ -12,7 +16,7 @@ the event log; explanations never change what is requested.
 from dataclasses import dataclass
 
 from pasteurizer.alarms import AlarmScope
-from pasteurizer.heating import AssistHeater
+from pasteurizer.heating import AssistHeater, PreheatCirculation
 from pasteurizer.manhole_drain import ManholeDrainController
 from pasteurizer.modes import Mode
 from pasteurizer.output_commands import (
@@ -22,6 +26,7 @@ from pasteurizer.output_commands import (
 )
 from pasteurizer.overflow_valves import OverflowValve
 from pasteurizer.process_state import (
+    PREHEAT_STATES,
     SECOND_STAGE_STATES,
     TREATMENT_STATES,
     ProcessState as P,
@@ -89,9 +94,14 @@ class OutputRequestBuilder:
         self.drain = ManholeDrainController(config)
         self.overflow = {line: OverflowValve(self.cs.overflow) for line in LINES}
         self.assist = AssistHeater(self.cs.heater_1kw)
+        self.preheat_circulation = PreheatCirculation(
+            self.cs.preheat_circulation, config.startup.preheat_complete_at_celsius)
         self.transfer_requested = {line: False for line in LINES}
 
-    def build(self, inputs, flags, process, manual, faults, arbiter) -> RequestSet:
+    def build(self, inputs, flags, process, manual, faults, arbiter, *,
+              heater_3kw_probing: bool = False) -> RequestSet:
+        """heater_3kw_probing: the solar probe for the 3 kW runs (no pause then)."""
+        self._probing = heater_3kw_probing
         frame = _Frame()
         manual_requests = manual.active_requests() if inputs.mode == Mode.MANUAL else {}
         self._transfer_pumps(frame, inputs, manual_requests, faults, arbiter)
@@ -102,6 +112,7 @@ class OutputRequestBuilder:
             release = self._auto_process(frame, inputs, flags, process, arbiter)
         else:
             self.assist.reset()
+            self.preheat_circulation.reset()
             if inputs.mode == Mode.MANUAL:
                 self._manual_process(frame, inputs, flags, manual, manual_requests)
             else:
@@ -120,9 +131,12 @@ class OutputRequestBuilder:
                     manual_requests.get(f"transfer_pump_{line}", False))
         decisions = {}
         if inputs.acquisition_ok:
+            # A 3 kW held off for a PT5 check still counts as preheating
+            # (last cycle's hold): transfers do not start in that pause.
             decisions = self.transfer.process(
                 inputs.effective,
-                heater_3kw_active=arbiter.possibly_on("heater_3kw", inputs.now),
+                heater_3kw_active=(arbiter.possibly_on("heater_3kw", inputs.now)
+                                   or self.preheat_circulation.hold_3kw),
                 overridden=inputs.overridden)
         for line in LINES:
             name = f"transfer_pump_{line}"
@@ -174,12 +188,30 @@ class OutputRequestBuilder:
         state = process.state
         why = f"Plant state {state.value}"
         heating = () if flags.heating_ok else ("HEATING_NOT_PERMITTED",)
-        frame.request("heater_3kw", state == P.PREHEAT_3KW,
-                      flags.heating_ok and state == P.PREHEAT_3KW, why=why,
-                      blocked_by=heating)
         second_stage = state in SECOND_STAGE_STATES
         permitted = flags.heating_ok and second_stage
-        frame.request("heating_circulation", second_stage, permitted, why=why,
+        paused = False
+        if state in PREHEAT_STATES:
+            pulse = self.preheat_circulation.update(
+                inputs.pt5, inputs.pt6, permitted=flags.heating_ok,
+                heating=state == P.PREHEAT_3KW, pump=process.circulation, now=inputs.now)
+            paused = (state == P.PREHEAT_3KW
+                      and self.preheat_circulation.pause_3kw(self._probing))
+            frame.request("heating_circulation", pulse, flags.heating_ok,
+                          why=f"{why}: {self.preheat_circulation.reason}",
+                          blocked_by=heating)
+        else:
+            self.preheat_circulation.reset()
+            frame.request("heating_circulation", second_stage, permitted,
+                          why=f"{why}: continuous circulation" if second_stage else why,
+                          blocked_by=heating)
+        heater_why = why
+        if paused:
+            heater_why = f"{why}: paused, PT5 at the preheat limit; waiting for the mixed reading"
+        elif state == P.PREHEAT_3KW and self.preheat_circulation.hold_3kw:
+            heater_why = f"{why}: PT5 check pending; not paused during the solar probe"
+        frame.request("heater_3kw", state == P.PREHEAT_3KW and not paused,
+                      flags.heating_ok and state == P.PREHEAT_3KW, why=heater_why,
                       blocked_by=heating)
         assist = self._assist(inputs, flags, process, second_stage)
         frame.request("heater_1kw", assist, permitted,

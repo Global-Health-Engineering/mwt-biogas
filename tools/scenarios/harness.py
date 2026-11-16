@@ -228,6 +228,12 @@ def stored_rows(database, table) -> list[dict]:
     return rows
 
 
+def overtemperature_offset(sim, target_c=95.0):
+    """PT6 offset that reads target_c now: above the 90 °C trip, inside the
+    100 °C plausible range (a reading beyond it is invalid, not hot)."""
+    return target_c - sim.status.signals["temperatures"]["PT6_B7"]["celsius"]
+
+
 def state_is(*states):
     return lambda sim: sim.state in states
 

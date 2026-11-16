@@ -29,7 +29,17 @@ from pasteurizer.controller.state_machine import ProcessStateMachine
 from pasteurizer.controller.status import ControllerStatus, build_status
 from pasteurizer.controller.treatment import TreatmentLogic
 from pasteurizer.controller.y4_monitor import Y4Monitor
-from pasteurizer.energy import HEATERS, NOT_INTERLOCKS, EnergyManager
+from pasteurizer.energy import (
+    ARMED,
+    HEATERS,
+    MEASURING,
+    NOT_INTERLOCKS,
+    SETTLING,
+    EnergyManager,
+)
+
+# Solar probe phases of a heater: switching it off now would fail the probe.
+PROBE_PHASES = (ARMED, SETTLING, MEASURING)
 from pasteurizer.event_log import EventLog
 from pasteurizer.fault_manager import FaultManager
 from pasteurizer.model_interface import ModelResult, ModelSupervisor
@@ -105,6 +115,7 @@ class PlantController:
         # and interlocks the solar probe sees (energy.update runs before them).
         self._last_requested = None
         self._last_notes = ()
+        self._biogas_reported = None    # last biogas heat status in the event log
         self.recorder = CycleRecorder(self.log, self.faults, control.logging,
                                       start_time=now, outputs_enabled=self.outputs_enabled,
                                       config=config)
@@ -225,6 +236,7 @@ class PlantController:
             manual_heating=self._manual_heating(inputs),
             transfer_requested=self.requests.transfer_requested,
             last_written=self.arbiter.last_written)
+        self._record_biogas_heat(inputs)
         # Solar permission first: the state machine waits for it before preheat.
         solar_view = self._solar_view()
         written = self.arbiter.last_written
@@ -239,8 +251,9 @@ class PlantController:
                                      self._solar_3kw_reason(energy)))
         flags = self.evaluator.flags(inputs)     # the step may latch a fault
 
-        requests = self.requests.build(inputs, flags, self.process, self.manual,
-                                       self.faults, self.arbiter)
+        requests = self.requests.build(
+            inputs, flags, self.process, self.manual, self.faults, self.arbiter,
+            heater_3kw_probing=energy.modes["heater_3kw"].phase in PROBE_PHASES)
         for kind, data in requests.events:
             self.log.record(kind, **data)
         indicators = IndicatorInputs(
@@ -272,7 +285,8 @@ class PlantController:
             outputs_enabled=self.outputs_enabled,
             energy={"status": energy.to_dict(), "solar": solar_view,
                     "settings": self._energy_settings()},
-            heating_wait=energy.waiting)
+            heating_wait=energy.waiting,
+            heating=self._heating_status(now))
         self.recorder.requested(self.status, requests.explanations)
         self.recorder.model(inputs)
         self.recorder.periodic(inputs, self.status)
@@ -284,6 +298,29 @@ class PlantController:
         return self.status
 
     # ------------------------------------------------------------------
+    def _record_biogas_heat(self, inputs):
+        """BIOGAS_HEAT event on every change of the diagnostic status."""
+        status = self.evaluator.biogas_status
+        current = None if status is None else status.status
+        if current == self._biogas_reported:
+            return
+        self._biogas_reported = current
+        self.log.record("BIOGAS_HEAT", status=current,
+                        label=status.label if status else "Not evaluated",
+                        delta_c=status.delta_c if status else None,
+                        pt5=inputs.pt5, pt6=inputs.pt6,
+                        circulation_s=status.circulation_s if status else None,
+                        reason=status.reason if status else "")
+
+    def _heating_status(self, now) -> dict:
+        preheat = None
+        if self.process.state.value in ("PREHEAT_3KW", "WAITING_FOR_SOLAR"):
+            preheat = self.requests.preheat_circulation.status(self.process.circulation, now)
+            preheat["pt5_refreshed"] = self.process.pt5_refreshed(now)
+        biogas = self.evaluator.biogas_status
+        return {"preheat_circulation": preheat,
+                "biogas_heat": biogas.to_dict() if biogas is not None else None}
+
     def _heat_requests(self) -> dict:
         """Heat request per electric heater: the AUTO cold start (waiting for
         solar or preheating) for the 3 kW, otherwise last cycle's requested

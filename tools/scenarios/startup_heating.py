@@ -3,22 +3,29 @@
 from scenarios.harness import FAST, Sim, make_config, scenario, state_is
 
 
-@scenario(1, "Cold start: preheat, break-before-make, HEAT_UP at 64 C")
+@scenario(1, "Cold start: preheat, break-before-make, circulation pulses with the 3 kW, HEAT_UP at 64 C")
 def s1():
-    sim = Sim(params=FAST, bath=40.0)
+    # FAST bath (~1 K / 5 s): idle and start interval shortened to match.
+    sim = Sim(params=FAST, bath=40.0,
+              control={"preheat_circulation.max_idle_s": 60.0,
+                       "preheat_circulation.min_start_interval_s": 60.0})
     sim.run(1)
     assert sim.state == "PREHEAT_3KW", sim.state
     sim.run(9.0)
     assert not sim.out("heater_3kw"), "3 kW must wait 10 s after start"
     sim.run(1.4)
     assert sim.out("heater_3kw")
-    assert not sim.out("heating_circulation") and not sim.out("transfer_pump_1")
+    assert not sim.out("transfer_pump_1") and not sim.out("heater_1kw")
+    # Mixing pulse (no PT6 - PT5 trigger in this simulator) runs WITH the 3 kW.
+    assert sim.run(70, until=lambda s: s.out("heating_circulation"))
+    assert sim.out("heater_3kw") and sim.state == "PREHEAT_3KW"
     assert sim.run(600, until=state_is("HEAT_UP"))
     assert sim.plant.bath_c >= 63.9
+    assert "after circulation" in sim.status.state_reason, sim.status.state_reason
+    # Second stage: the pump was already on with the 3 kW, so it runs on
+    # without a switching pause; the 1 kW still waits after the 3 kW.
     sim.run(0.4)
-    assert not sim.out("heating_circulation"), "circulation waits 10 s after 3 kW off"
-    sim.run(10.4)
-    assert sim.out("heating_circulation")
+    assert sim.out("heating_circulation") and not sim.out("heater_3kw")
 
 
 @scenario(2, "Warm start skips preheat")

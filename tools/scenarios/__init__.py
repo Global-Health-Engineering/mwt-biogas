@@ -8,6 +8,7 @@ from scenarios import (  # noqa: F401  (imported for registration)
     faults,
     gui,
     gui_data,
+    heating_circulation,
     historian,
     manual,
     operator,

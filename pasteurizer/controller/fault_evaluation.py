@@ -9,9 +9,12 @@ from dataclasses import dataclass
 from pasteurizer.controller.conditions import fallback_prerequisites, heating_permitted
 from pasteurizer.controller.y4_monitor import Y4Monitor
 from pasteurizer.fault_manager import FaultManager, FaultSummary
+from pasteurizer.heating import BiogasHeatMonitor
 from pasteurizer.model_interface import ModelStatus
+from pasteurizer.modes import Mode
 from pasteurizer.process_state import (
     ACTIVE_STATES,
+    SECOND_STAGE_STATES,
     TREATMENT_STATES,
     ProcessState as P,
     TreatmentPath,
@@ -73,6 +76,8 @@ class FaultEvaluator:
         self._pt3 = _SensorWatch()
         self._flow3 = _SensorWatch()
         self._heating = _SensorWatch()
+        self.biogas = BiogasHeatMonitor(self.cs.biogas_heat)
+        self.biogas_status = None      # BiogasHeatStatus of the last evaluation
 
     def evaluate(self, inputs, process, *, system: SystemHealth, manual_heating: bool,
                  transfer_requested: dict, last_written) -> FaultFlags:
@@ -81,6 +86,7 @@ class FaultEvaluator:
         self._heating_sensors(inputs, process, manual_heating)
         self._temperatures(inputs)
         self._preheat(inputs, process)
+        self._biogas_heat(inputs, process)
         self._valve(inputs, process)
         self._treatment_events(inputs, process)
         self._model(inputs, process)
@@ -169,6 +175,16 @@ class FaultEvaluator:
                    and process.preheat_heated_s > self.cs.preheat.max_duration_s)
         self.faults.set("PREHEAT_TIMEOUT", True if overdue else
                         (False if inputs.pt5 is not None else None))
+
+    def _biogas_heat(self, inputs, process):
+        """Diagnostic only: a Level 1 warning, never an interlock (READY and
+        treatment with the 1 kW alone stay possible)."""
+        active = (inputs.acquisition_ok and inputs.mode == Mode.AUTO
+                  and process.state in SECOND_STAGE_STATES)
+        status = self.biogas.update(active=active, pump=process.circulation,
+                                    pt5=inputs.pt5, pt6=inputs.pt6, now=inputs.now)
+        self.biogas_status = status
+        self.faults.set("BIOGAS_HEAT_NOT_DETECTED", status.warning)
 
     def _valve(self, inputs, process):
         relevant = process.state in ACTIVE_STATES or process.state == P.STOPPING

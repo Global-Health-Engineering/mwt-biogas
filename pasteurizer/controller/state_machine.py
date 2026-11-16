@@ -4,7 +4,11 @@ Decides the plant state once per cycle from the cycle inputs and fault
 flags. A cold start without solar permission for the 3 kW heater waits in
 WAITING_FOR_SOLAR (nothing heats) and preheats once the permission is there;
 losing the permission during preheat returns to WAITING_FOR_SOLAR. The
-preheat heating time is kept across these changes. Treatment states are
+preheat heating time is kept across these changes. From either state the
+transition to HEAT_UP needs PT5 at the preheat limit measured after a
+circulation pulse has refreshed it (pump written on for the pulse's minimum
+run time); a plain reading with the pump off never completes a preheat.
+Treatment states are
 delegated to TreatmentLogic, which returns a Transition; every transition is
 logged with its reason.
 """
@@ -16,6 +20,7 @@ from pasteurizer.controller.conditions import (
 )
 from pasteurizer.controller.treatment import Transition, TreatmentLogic
 from pasteurizer.fault_manager import Persistence
+from pasteurizer.heating import OutputTimer
 from pasteurizer.modes import Mode
 from pasteurizer.process_state import (
     ACTIVE_STATES,
@@ -46,6 +51,8 @@ class ProcessStateMachine:
         self.preheat_heated_s = 0.0
         self._preheat_tick: float | None = None
         self._solar_3kw = (True, "")
+        # Heating-water circulation as written (preheat pulses, biogas diagnostic).
+        self.circulation = OutputTimer()
         self.dwell = Persistence()
         self.supply_lost = Persistence()
 
@@ -104,6 +111,8 @@ class ProcessStateMachine:
         self._solar_3kw = solar_3kw
         now = inputs.now
         self._count_preheat(now, last_written)
+        self.circulation.update(
+            bool(last_written is not None and last_written.heating_circulation), now)
         state = self.state
         if flags.summary.trip:
             self._to(P.TRIPPED, "Level 3 fault", now,
@@ -163,10 +172,21 @@ class ProcessStateMachine:
         else:
             self._qualify(inputs, flags)
 
+    def pt5_refreshed(self, now) -> bool:
+        """PT5 counts as refreshed while the circulation has been written on
+        for at least the preheat pulse's minimum run time."""
+        return self.circulation.on_for(now) >= self.cs.preheat_circulation.min_run_s
+
     def _preheat(self, inputs):
+        """Also completes a preheat interrupted by WAITING_FOR_SOLAR: the same
+        refreshed-PT5 qualification applies in both states."""
         complete = self.cfg.startup.preheat_complete_at_celsius
-        if inputs.pt5 is not None and inputs.pt5 >= complete:
-            self._to(P.HEAT_UP, "Preheat complete", inputs.now)
+        if (inputs.pt5 is not None and inputs.pt5 >= complete
+                and self.pt5_refreshed(inputs.now)):
+            waited = " (solar wait)" if self.state == P.WAITING_FOR_SOLAR else ""
+            self._to(P.HEAT_UP,
+                     f"Preheat complete{waited}: PT5 {inputs.pt5:.1f} °C after circulation",
+                     inputs.now)
             return
         permitted, reason = self._solar_3kw
         if self.state == P.WAITING_FOR_SOLAR and permitted:

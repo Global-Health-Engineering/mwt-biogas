@@ -220,6 +220,7 @@ def process_sample(inputs, status) -> dict:
         "lights": status.lights,
         "alarms": [a.code for a in status.alarms if a.active],
         "energy": energy_sample(status),
+        "biogas_heat": ((status.heating or {}).get("biogas_heat") or {}).get("status"),
     }
 
 

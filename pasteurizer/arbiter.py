@@ -9,8 +9,9 @@ Rules, applied in this order every cycle (settings in arbiter_settings.json):
    allow requests; they never create one.
 3. Preheat exclusion: while the 3 kW heater is requested, every output in
    preheat_exclusion.excluded_outputs is removed (transfer pumps, 1 kW
-   heater, heating circulation, manhole drain, compressor). Overflow valves
-   Y1/Y2 are not affected.
+   heater, manhole drain, compressor). The heating-water circulation is not
+   excluded: it pulses together with the 3 kW in PREHEAT_3KW. Overflow
+   valves Y1/Y2 are not affected.
 4. Energy (solar): the electric heaters (1 kW, 3 kW, both) run only with
    the solar permission from pasteurizer/energy.py (surplus, SOC, timers,
    inverter data), when energy.solar_permission_enabled is true. The

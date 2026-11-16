@@ -8,6 +8,20 @@
   "preheat": {
     "max_duration_s": 18000.0
   },
+  "preheat_circulation": {
+    "trigger_delta_c": 5.0,
+    "min_run_s": 20.0,
+    "min_off_s": 20.0,
+    "min_start_interval_s": 300.0,
+    "max_idle_s": 600.0
+  },
+  "biogas_heat": {
+    "startup_delay_s": 120.0,
+    "delta_min_c": 2.0,
+    "hold_s": 60.0,
+    "observation_s": 900.0,
+    "loss_s": 300.0
+  },
   "model": {
     "target_log": 3.0,
     "operating_reserve_log": 0.5,

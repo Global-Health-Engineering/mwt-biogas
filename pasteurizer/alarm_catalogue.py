@@ -60,6 +60,9 @@ CATALOGUE: dict[str, AlarmInfo] = {
     "PT4_INVALID": AlarmInfo(("PT4_B5",), "Warning only; treatment continues"),
     "OVERTEMPERATURE": AlarmInfo(("PT5_B6", "PT6_B7"), PASTEURIZER_TRIP),
     "PREHEAT_TIMEOUT": AlarmInfo(("heater_3kw", "PT5_B6"), "3 kW off; " + PASTEURIZER_TRIP),
+    "BIOGAS_HEAT_NOT_DETECTED": AlarmInfo(
+        ("heating_circulation", "PT5_B6", "PT6_B7"),
+        "Warning only; circulation, 1 kW heating and treatment continue"),
     "Y4_POSITION_TIMEOUT": AlarmInfo(("control_valve_percent",), PASTEURIZER_TRIP),
     "Y4_FEEDBACK_INVALID": AlarmInfo(
         ("control_valve_percent",), "Release inhibited: Y3/Y4 closed, no reopening"),

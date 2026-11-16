@@ -94,6 +94,8 @@ FAULTS = [
            "Reset when both are valid and below the reset temperature"),
     _fault("PREHEAT_TIMEOUT", S.PASTEURIZER, 3, "3 kW preheat took too long",
            "Check heater and PT5, then reset"),
+    _fault("BIOGAS_HEAT_NOT_DETECTED", S.PASTEURIZER, 1, "Biogas heat not detected",
+           "Check biogas supply and burner; clears when heat input qualifies again"),
     _fault("Y4_POSITION_TIMEOUT", S.PASTEURIZER, 3, "Y4 did not reach its position",
            "Check valve Y4 and its feedback, then reset"),
     _fault("Y4_FEEDBACK_INVALID", S.PASTEURIZER, 1,

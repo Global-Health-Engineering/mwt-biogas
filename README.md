@@ -297,7 +297,8 @@ reworked with combined 4 kW heating.
   reason names the missing surplus or SOC. It moves to PREHEAT_3KW once the
   3 kW is permitted, and back when the permission ends during preheat. It
   leaves like any active state (STOP, selector, faults, supply) and goes to
-  HEAT_UP if PT5 reaches the preheat limit anyway. A warm start needs no
+  HEAT_UP if PT5 reaches the preheat limit anyway, but only on a PT5
+  refreshed by a circulation pulse (see AUTO heating below). A warm start needs no
   solar. Green lamp: double blink (on 0.3 s, off 0.3 s, on 0.3 s, off 2 s;
   `arbiter_settings.json` `indicators.solar_wait_pulse_seconds` /
   `solar_wait_pause_seconds`; the pulse must stay longer than the 0.2 s scan).
@@ -313,6 +314,94 @@ reworked with combined 4 kW heating.
 - Simulation (`tools/run_simulation.py`, scenarios) uses
   `pasteurizer/simulated_solar.py` (sunny by default; its load includes the
   heaters that are on).
+
+### AUTO heating: circulation pulses in preheat, biogas heat diagnostic
+
+On this installation, starting the heating-water circulation pump
+(`heating_circulation`) also calls for burner ignition. The RevPi has no
+burner enable and no flame feedback; ignition retries are left to the
+burner's own controls. All timing below follows the **written** pump output
+(`OutputTimer` in `pasteurizer/heating.py`), never a running feedback.
+
+**Cold start** (`control_settings.json` `preheat_circulation`): in
+PREHEAT_3KW the 3 kW heater and the circulation run together. The circulation is no longer in
+`arbiter_settings.json` `preheat_exclusion.excluded_outputs`; transfer pumps,
+1 kW, manhole drain and compressor still are. Heater power permissions
+(solar probe for the 3 kW) and the safety interlocks are unchanged.
+
+| Rule | Setting (provisional) |
+|---|---|
+| Pulse on stratification: valid PT6 - PT5 >= trigger (PREHEAT_3KW) | `trigger_delta_c` 5 °C |
+| Mixing pulse when the pump has not run since the last pulse or the start of this cold start (PREHEAT_3KW) | `max_idle_s` 600 s |
+| Refresh pulse: valid PT5 at the preheat limit read with the pump off (PREHEAT_3KW and WAITING_FOR_SOLAR) | `startup_settings.json` `preheat_complete_at_celsius` 64 °C |
+| Pulse length (written on) | `min_run_s` 20 s |
+| Written off after every pulse before any start | `min_off_s` 20 s |
+| Start to start (every written pump start = burner ignition call), all triggers, restarts included | `min_start_interval_s` 300 s |
+| -> HEAT_UP from PREHEAT_3KW or WAITING_FOR_SOLAR at 64 °C only on a PT5 read while the pump has been written on for `min_run_s` | refreshed reading |
+
+- `min_start_interval_s` 300 s caps pulse starts at 12 per hour whatever the
+  trigger (before: up to 90 per hour with a held PT6 - PT5). **Placeholder:**
+  no burner cycling limit is documented in the project files; set it from
+  the burner manual's permitted starts per hour. A trigger that comes while
+  the interval runs waits (status `next_start_allowed_in_s`).
+- **3 kW pause for the PT5 check** (PREHEAT_3KW): a valid PT5 at 64 °C that
+  is not a refreshed reading holds the 3 kW off (`heater_3kw_hold`) until a
+  refresh pulse has run `min_run_s`, waiting for the start interval if
+  needed. Mixed PT5 still >= 64 °C -> HEAT_UP; below -> the 3 kW resumes and
+  the next stagnant 64 °C reading pauses it again. The pause is not applied
+  during the 3 kW solar probe (switching off would fail it); once the probe
+  passed, a paused heater keeps its solar permission. Transfer pumps stay
+  held during the pause; the preheat timeout counts only written-on time.
+  Without the pause, the 3 kW would heat on for up to the interval: bulk
+  estimate dT = P t / (m c) = 3000 W x 300 s / (500 kg x 4186 J/(kg K))
+  = 0.43 K (500 L tank; 1.1 K for 200 L), losses ignored. The stagnant PT5
+  near the heater or in a hot layer can rise much more; no data yet.
+- `max_idle_s` 600 s: PT5 refreshed and the water mixed at least every
+  ~10 min without stratification.
+- **Solar loss** (PREHEAT_3KW -> WAITING_FOR_SOLAR) does not cut a running
+  pulse: it finishes its `min_run_s` (a cut pulse is a short burner cycle);
+  the next start waits for the start interval. The energy manager already
+  delays a returning 3 kW permission (10 min retry after a failed probe, SOC
+  back to 70 % after a 50 % cutoff); the start interval bounds burner calls
+  even when the permission flaps faster.
+- WAITING_FOR_SOLAR circulates only to finish a pulse or for the PT5 refresh
+  check (no electric heat). A plain PT5 at 64 °C with the pump off never
+  completes a preheat, from either state.
+- STOP, selector, trips (overtemperature, PT5/PT6 invalid, preheat timeout)
+  end a pulse at once.
+- Status: `heating.preheat_circulation` (requested, trigger DELTA /
+  MAX_IDLE, pump on/off time, `pt5_refreshed`, reason); every request change
+  is in `OUTPUT_REQUESTED` with the reason.
+
+**Second stage (HEAT_UP, READY, FALLBACK_QUALIFY, treatment)**: continuous
+circulation under the existing interlocks, 1 kW assist unchanged.
+**Biogas heat diagnostic** (`control_settings.json` `biogas_heat`, diagnostic
+only, never an interlock):
+
+| Step | Setting (provisional) |
+|---|---|
+| Circulation written on for the startup delay before judging | `startup_delay_s` 120 s |
+| Heat detected: valid PT6 - PT5 >= threshold held for the hold time | `delta_min_c` 2 °C, `hold_s` 60 s |
+| Initial check: not detected within the window -> warning | `observation_s` 900 s |
+| After detection: below threshold for the loss time -> warning | `loss_s` 300 s |
+
+- Status `heating.biogas_heat.status`: `CHECKING` ("Checking"), `DETECTED`
+  ("Biogas heat detected"), `NOT_DETECTED` ("Biogas heat not detected"),
+  `null` outside the AUTO second stage. Event `BIOGAS_HEAT` on every change
+  (PT5, PT6, delta); the periodic sample carries the status.
+- Warning `BIOGAS_HEAT_NOT_DETECTED` (Level 1, yellow): raised on a missed
+  window or a sustained loss, cleared when heat qualifies again or when AUTO
+  leaves the second stage. Circulation stays requested; the 1 kW keeps its
+  control and solar permission. READY (PT5 >= 75 °C for 60 s) and treatment
+  with the 1 kW alone stay possible under the unchanged entry and
+  continuation criteria.
+- Invalid PT5/PT6 never qualify and never count as a loss. Circulation
+  stopping resets the qualification (status Checking, the warning is kept).
+- Defaults are placeholders: tune from known-good and gas-off PT5/PT6 traces
+  at commissioning. `loss_s` must outlast normal burner thermostat
+  off-cycles near the top temperature (not modelled in the simulator).
+- Simulator: PT6 reads 3 K above PT5 while circulating with gas;
+  `biogas_power_w = 0` is the gas-off case. Scenarios 127-144.
 
 ## Controller on the RevPi (production: outputs enabled)
 

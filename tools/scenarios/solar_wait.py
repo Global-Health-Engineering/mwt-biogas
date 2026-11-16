@@ -72,14 +72,16 @@ def s122():
     assert excluded or not sim.status.requested["transfer_pump_1"]   # HEATER_3KW_ACTIVE
     sim.plant.tank[1] = 50.0
 
-    # Water already warm while waiting (e.g. biogas heated it): straight to HEAT_UP.
+    # Water already warm while waiting (e.g. biogas heated it): a circulation
+    # pulse refreshes PT5 first, then HEAT_UP (no electric heat).
     warm = _cold_night()
     warm.run(10)
     assert warm.status.state == "WAITING_FOR_SOLAR"
     warm.plant.bath_c = 70.0
-    assert warm.run(30, until=lambda s: s.status.state == "HEAT_UP")
-    assert [e["data"]["reason"] for e in warm.events("STATE_TRANSITION")][-1] == \
-        "Preheat complete"
+    assert warm.run(60, until=lambda s: s.status.state == "HEAT_UP")
+    assert [e["data"]["reason"] for e in warm.events("STATE_TRANSITION")][-1].startswith(
+        "Preheat complete (solar wait): PT5"), warm.events("STATE_TRANSITION")[-1]
+    assert not warm.out("heater_3kw")
 
     # Warm start at night needs no solar (biogas heating is never gated).
     night_warm = Sim(params=dict(bath_heat_capacity_j_k=2_000_000.0), bath=70.0)

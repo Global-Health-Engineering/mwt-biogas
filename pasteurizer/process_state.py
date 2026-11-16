@@ -6,7 +6,9 @@ from enum import Enum
 class ProcessState(str, Enum):
     IDLE = "IDLE"                              # treatment isolated, process heat off
     # Cold start with every start check passed, but the solar permission for
-    # the 3 kW heater is missing: nothing heats; preheat starts once permitted.
+    # the 3 kW heater is missing: no electric heat; preheat starts once
+    # permitted. The circulation runs only to finish a pulse or to refresh a
+    # PT5 reading at the preheat limit (each start calls the burner).
     WAITING_FOR_SOLAR = "WAITING_FOR_SOLAR"
     PREHEAT_3KW = "PREHEAT_3KW"                # cold-start heating, 3 kW only
     HEAT_UP = "HEAT_UP"                        # second-stage heating, effluent isolated
@@ -45,5 +47,7 @@ SECOND_STAGE_STATES = frozenset({
     ProcessState.FALLBACK_TREATMENT,
 })
 
-ACTIVE_STATES = (frozenset({ProcessState.WAITING_FOR_SOLAR, ProcessState.PREHEAT_3KW})
-                 | SECOND_STAGE_STATES)
+# One cold start: waiting for solar and preheating share timers and pulses.
+PREHEAT_STATES = frozenset({ProcessState.WAITING_FOR_SOLAR, ProcessState.PREHEAT_3KW})
+
+ACTIVE_STATES = PREHEAT_STATES | SECOND_STAGE_STATES

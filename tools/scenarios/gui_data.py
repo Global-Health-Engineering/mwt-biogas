@@ -9,7 +9,8 @@ from pasteurizer.alarm_catalogue import CATALOGUE, PASTEURIZER_TRIP
 from pasteurizer.fault_manager import FAULTS
 from pasteurizer.historian.queries import HistoryReader
 from scenarios.harness import (
-    FAST, MODEL_ON, OPERATOR, Sim, make_config, scenario, state_is, to_fallback_treatment,
+    FAST, MODEL_ON, OPERATOR, Sim, make_config, overtemperature_offset, scenario, state_is,
+    to_fallback_treatment,
 )
 from scenarios.historian import temp_db
 
@@ -62,7 +63,7 @@ def s71():
     sim = Sim(params=FAST, bath=70.0)
     sim.run(5)
     before = sim.wall()
-    sim.plant.faults.temperature_offsets["PT6_B7"] = 30.0
+    sim.plant.faults.temperature_offsets["PT6_B7"] = overtemperature_offset(sim)
     sim.run(0.6)
     alarm = sim.alarm("OVERTEMPERATURE")
     assert alarm.severity == "CRITICAL" and alarm.equipment == ("PT5_B6", "PT6_B7")

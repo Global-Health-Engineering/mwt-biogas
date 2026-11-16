@@ -64,27 +64,31 @@ conflict = OutputCommands(
 first = run(arbiter, conflict, state=ProcessState.PREHEAT_3KW)
 assert first.commands.heater_3kw is False
 assert rules(first, "heater_3kw") == ["SWITCHING_PAUSE"]
-for name in ("transfer_pump_1", "heater_1kw", "heating_circulation", "manhole_drain"):
+for name in ("transfer_pump_1", "heater_1kw", "manhole_drain"):
     assert getattr(first.commands, name) is False
     assert rules(first, name) == ["PREHEAT_EXCLUSION"], (name, first.notes)
 assert first.commands.overflow_valve_1_open is True        # safety drain stays
+# Heating circulation runs with the 3 kW (preheat pulses): not excluded.
+assert first.commands.heating_circulation is True and not rules(first, "heating_circulation")
 later = run(arbiter, conflict, seconds=9.6, state=ProcessState.PREHEAT_3KW)
 assert later.commands.heater_3kw is False                   # still in the pause
 later = run(arbiter, conflict, seconds=0.6, state=ProcessState.PREHEAT_3KW)
 assert later.commands.heater_3kw is True
 assert later.commands.transfer_pump_1 is False
-print("1. Conflicts removed at once; 3 kW waits 10 s with loads off; Y1 unaffected.")
+assert later.commands.heating_circulation is True
+print("1. Conflicts removed at once; 3 kW waits 10 s with loads off; Y1 and circulation unaffected.")
 
 # 2. After preheat: loads wait 10 s after the heater switched off ---------
 after = OutputCommands(transfer_pump_1=True, heating_circulation=True)
 result = run(arbiter, after, state=ProcessState.HEAT_UP)
 assert result.commands.transfer_pump_1 is False
 assert rules(result, "transfer_pump_1") == ["SWITCHING_PAUSE"]
+assert result.commands.heating_circulation is True          # no pause for circulation
 result = run(arbiter, after, seconds=9.6, state=ProcessState.HEAT_UP)
 assert result.commands.transfer_pump_1 is False
 result = run(arbiter, after, seconds=0.6, state=ProcessState.HEAT_UP)
 assert result.commands.transfer_pump_1 and result.commands.heating_circulation
-print("2. Pumps and circulation start only 10 s after the 3 kW heater is off.")
+print("2. Transfer pumps start only 10 s after the 3 kW heater is off; circulation at once.")
 
 # 3. Permission denied with reason ----------------------------------------
 denied = OutputPermissions.only(
