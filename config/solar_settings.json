@@ -7,7 +7,7 @@
   "soc_mismatch_pct": 2,
   "battery_charge_sign_verified": false,
   "inverters": [
-    {"id": "inverter_1", "name": "Inverter 1", "host": "192.168.1.158", "port": 502, "device_id": 1},
+    {"id": "inverter_1", "name": "Inverter 1", "host": "192.168.1.157", "port": 502, "device_id": 1},
     {"id": "inverter_2", "name": "Inverter 2", "host": "192.168.1.162", "port": 502, "device_id": 1}
   ]
 }
