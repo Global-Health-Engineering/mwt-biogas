@@ -105,12 +105,6 @@ class EnergySettings:
     # Rated electrical power per heater; also what is subtracted from the
     # measured load while that heater is on (no double counting).
     heater_power_w: dict[str, float]
-    # Surplus rule: now only for both heaters together (1 kW + 3 kW); a single
-    # heater gets its permission from the probe below.
-    start_surplus_fraction: float       # 0.20: 800 W for both
-    stop_surplus_fraction: float        # 0.15: below this for stop_delay_s -> off
-    start_delay_s: float
-    stop_delay_s: float
     soc_start_min_percent: float        # may start (or probe) at >= this
     soc_stop_at_percent: float          # off at once at <= this, also during a probe
     communication_timeout_s: float      # running heater: missing data -> off after this
@@ -426,8 +420,7 @@ PROBE_KEYS = ("probe_min_pv_w", "probe_settle_s", "probe_switch_on_timeout_s",
 
 def _energy(data, where) -> EnergySettings:
     _exact_keys(data, ("solar_permission_enabled", "heater_power_w",
-                       "start_surplus_fraction", "stop_surplus_fraction",
-                       "start_delay_s", "stop_delay_s", "soc_start_min_percent",
+                       "soc_start_min_percent",
                        "soc_stop_at_percent", "communication_timeout_s",
                        *PROBE_KEYS), where)
     powers = _exact_keys(data["heater_power_w"], ENERGY_HEATERS, f"{where}.heater_power_w")
@@ -437,16 +430,6 @@ def _energy(data, where) -> EnergySettings:
         heater_power_w={name: _number(powers[name], f"{where}.heater_power_w.{name}",
                                       strictly_positive=True, maximum=20000.0)
                         for name in ENERGY_HEATERS},
-        start_surplus_fraction=_number(data["start_surplus_fraction"],
-                                       f"{where}.start_surplus_fraction",
-                                       strictly_positive=True, maximum=1.0),
-        stop_surplus_fraction=_number(data["stop_surplus_fraction"],
-                                      f"{where}.stop_surplus_fraction",
-                                      minimum=0.0, maximum=1.0),
-        start_delay_s=_number(data["start_delay_s"], f"{where}.start_delay_s",
-                              minimum=0.0, maximum=3600.0),
-        stop_delay_s=_number(data["stop_delay_s"], f"{where}.stop_delay_s",
-                             minimum=0.0, maximum=3600.0),
         soc_start_min_percent=_number(data["soc_start_min_percent"],
                                       f"{where}.soc_start_min_percent",
                                       minimum=0.0, maximum=100.0),
@@ -484,9 +467,6 @@ def _energy(data, where) -> EnergySettings:
             data["battery_balance_tolerance_fraction"],
             f"{where}.battery_balance_tolerance_fraction", minimum=0.0, maximum=10.0),
     )
-    if settings.stop_surplus_fraction > settings.start_surplus_fraction:
-        raise ConfigError(f"{where}: stop_surplus_fraction must not exceed "
-                          "start_surplus_fraction (hysteresis)")
     if settings.soc_stop_at_percent >= settings.soc_start_min_percent:
         raise ConfigError(f"{where}: soc_stop_at_percent must be below "
                           "soc_start_min_percent (hysteresis)")

@@ -260,7 +260,7 @@ const SOLAR = (() => {
   }
 
   /* Electrical heating panel ------------------------------------------------ */
-  const MODE_LABEL = { heater_1kw: "1 kW", heater_3kw: "3 kW", both: "1 kW + 3 kW" };
+  const MODE_LABEL = { heater_1kw: "1 kW", heater_3kw: "3 kW" };
   const HEATER_LABEL = { heater_1kw: "1 kW assist heater (EH-02)", heater_3kw: "3 kW startup heater (EH-01)" };
   const W_ = (w) => (w == null ? "—" : `${Math.round(w)} W`);
   const yesNo = (b) => (b == null ? "—" : b ? "on" : "off");
@@ -319,7 +319,7 @@ const SOLAR = (() => {
     const clock = (s) => { s = Math.max(0, Math.ceil(s)); return s >= 60 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}` : `${s} s`; };
     const stateText = (m) => {
       const t = m.timer_s != null ? ` (${clock(m.timer_s)})` : "";
-      return { PERMITTED: "PERMITTED", STARTING: `STARTING${t}`, STOPPING: `STOPPING${t}`,
+      return { PERMITTED: "PERMITTED", STOPPING: `STOPPING${t}`,
                BLOCKED: "BLOCKED", DISABLED: "RULE OFF",
                PROBING: `TEST ${m.phase || ""}${t}`, RETRY_WAIT: `RETRY${t}` }[m.state] || m.state;
     };
@@ -330,11 +330,10 @@ const SOLAR = (() => {
         ` · balance PV + battery − load ${Math.round(last.balance_residual_w)} W${last.balance_ok === false ? " (outside tolerance: check battery sign/sum)" : ""}`;
       return `<div class="small muted">Last: ${esc(last.result)} — ${esc(last.reason)}${esc(res)}</div>`;
     };
-    const needs = (key, m) => key === "both"
-      ? [`≥ ${W_(m.start_need_w)} surplus`, `&lt; ${W_(m.stop_need_w)}`]
-      : [`test: ≥ ${pct(set.probe_min_solar_contribution)} solar, ≤ ${W_(set.probe_max_battery_discharge_w)} battery`,
-         `same, ${set.probe_hold_s} s`];
-    q("#energy-modes").innerHTML = ["heater_1kw", "heater_3kw", "both"].map((key) => {
+    const needs = () =>
+      [`test: ≥ ${pct(set.probe_min_solar_contribution)} solar, ≤ ${W_(set.probe_max_battery_discharge_w)} battery`,
+       `same, ${set.probe_hold_s} s`];
+    q("#energy-modes").innerHTML = ["heater_1kw", "heater_3kw"].map((key) => {
       const m = (e.modes || {})[key];
       if (!m) return "";
       const cls = m.permitted ? "good-text" : "bad-text";
@@ -342,8 +341,8 @@ const SOLAR = (() => {
       return `<tr><td><b>${MODE_LABEL[key]}</b></td><td>${W_(m.power_w)}</td><td>${start}</td>
         <td>${stop}</td><td>${m.contribution_percent == null ? "—" : `${Math.round(m.contribution_percent)} %`}</td>
         <td class="${cls}"><b>${esc(stateText(m))}</b></td><td class="wrap">${esc(m.reason)}${m.timer_s != null && m.state !== "BLOCKED" ? ` ${clock(m.timer_s)}` : ""}${lastProbe(m)}</td></tr>`;
-    }).join("") + (e.modes && e.modes.both ? `<tr><td colspan="7" class="small muted">1 kW + 3 kW never run together today:
-      the preheat exclusion (arbiter rule 3) removes the 1 kW while the 3 kW is requested.</td></tr>` : "");
+    }).join("") + (e.modes ? `<tr><td colspan="7" class="small muted">1 kW + 3 kW together: not permitted
+      (no combined solar rule yet). The preheat exclusion also removes the 1 kW while the 3 kW is requested.</td></tr>` : "");
 
     q("#energy-heaters").innerHTML = Object.entries(body.heaters || {}).map(([name, h]) => {
       const notes = (h.notes || []).map((n) => `${n.rule}: ${n.message}`).join("; ");

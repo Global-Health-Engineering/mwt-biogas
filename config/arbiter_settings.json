@@ -17,10 +17,6 @@
       "heater_1kw": 1000.0,
       "heater_3kw": 3000.0
     },
-    "start_surplus_fraction": 0.001,
-    "stop_surplus_fraction": 0.001,
-    "start_delay_s": 120.0,
-    "stop_delay_s": 120.0,
     "soc_start_min_percent": 70.0,
     "soc_stop_at_percent": 50.0,
     "communication_timeout_s": 60.0,

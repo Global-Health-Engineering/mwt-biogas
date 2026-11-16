@@ -1,10 +1,10 @@
-"""Solar-based permission for the electric heaters (1 kW, 3 kW, both = 4 kW).
+"""Solar-based permission for the electric heaters (1 kW or 3 kW, one at a time).
 
 The electric heaters may only run on solar power during the day, never drain
 the battery at night. Each cycle the controller passes the combined
 measurements of both Deye inverters (pasteurizer/solar.py, SolarLink.view()),
 the heaters on in the last written frame, the heat requests and the heaters
-an interlock holds off. The result is a permission per mode; the arbiter
+an interlock holds off. The result is a permission per heater; the arbiter
 (rule 4) removes heater requests without permission. Nothing here creates a
 request or bypasses another interlock; the biogas heating
 (heating_circulation) is never gated.
@@ -40,8 +40,10 @@ and the solar power that then comes in is measured:
     once (IDLE, a new start needs the start SOC again); heat request ended or
     an interlock holds the heater off -> probe ends (IDLE, no retry delay).
 
-Both heaters together (only possible without the preheat exclusion): the
-surplus rule below (start/stop fractions and delays), unchanged for now.
+Both heaters together (1 kW + 3 kW): never permitted. There is no combined
+rule yet (planned with the combined 4 kW heating); the arbiter keeps the
+larger permitted heater. With the preheat exclusion they are never
+requested together anyway.
 
 Other loads: the measured inverter load already contains the heaters that
 are on, so other loads = combined load - rated power of the heaters on
@@ -63,14 +65,14 @@ HEATERS = ("heater_1kw", "heater_3kw")
 MODES = {
     "heater_1kw": ("heater_1kw",),
     "heater_3kw": ("heater_3kw",),
-    "both": ("heater_1kw", "heater_3kw"),
 }
-MODE_NAMES = {"heater_1kw": "1 kW", "heater_3kw": "3 kW", "both": "1 kW + 3 kW"}
+MODE_NAMES = {"heater_1kw": "1 kW", "heater_3kw": "3 kW"}
+TOGETHER_REASON = ("1 kW + 3 kW together not permitted: no combined solar rule yet "
+                   "(planned with the 4 kW heating)")
 
-# Mode states (per mode)
-PERMITTED = "PERMITTED"     # may run (single heater: probe passed, RUNNING)
-STARTING = "STARTING"       # both: start conditions met, start delay running
-STOPPING = "STOPPING"       # permitted, stop delay running (values low or data missing)
+# Mode states (per heater)
+PERMITTED = "PERMITTED"     # may run (probe passed, RUNNING)
+STOPPING = "STOPPING"       # permitted, off after a delay (values low or data missing)
 BLOCKED = "BLOCKED"         # not permitted, reason says why
 DISABLED = "DISABLED"       # rule switched off in the settings: always permitted
 PROBING = "PROBING"         # single heater: test running (permitted)
@@ -88,15 +90,6 @@ NOT_INTERLOCKS = ("ENERGY_SOLAR", "ENERGY_UNKNOWN", "SWITCHING_PAUSE")
 def _finite(value) -> bool:
     return (isinstance(value, (int, float)) and not isinstance(value, bool)
             and math.isfinite(value))
-
-
-def mode_for(heaters) -> str | None:
-    """Mode key for a set of heaters that are (to be) on."""
-    on = tuple(name for name in HEATERS if name in heaters)
-    for key, members in MODES.items():
-        if members == on:
-            return key
-    return None
 
 
 def pct(fraction) -> str:
@@ -191,7 +184,7 @@ class EnergyStatus:
     battery_direction: str | None
     soc_percent: float | None
     soc_each: tuple
-    available_heating_w: float      # largest permitted mode (0 / 1000 / 3000 / 4000)
+    available_heating_w: float      # largest permitted heater (0 / 1000 / 3000)
     modes: dict = field(default_factory=dict)       # mode -> ModeStatus
     requests: tuple = ()            # heaters with a heat request this cycle
     waiting: str = ""               # what the electric heating waits for (status line)
@@ -199,32 +192,24 @@ class EnergyStatus:
     balance_ok: bool | None = None              # within the tolerance (diagnostic)
 
     def permitted(self, heaters) -> bool:
-        """May exactly these heaters run together?"""
-        key = mode_for(heaters)
-        if key is None:
+        """May exactly these heaters run together? Never both (no combined rule)."""
+        on = [name for name in HEATERS if name in heaters]
+        if not on:
             return True                 # no heater: nothing to permit
-        return self.modes[key].permitted
+        if len(on) > 1:
+            return False
+        return self.modes[on[0]].permitted
 
     def reason(self, heaters) -> str:
-        key = mode_for(heaters)
-        return "" if key is None else self.modes[key].reason
+        on = [name for name in HEATERS if name in heaters]
+        if len(on) > 1:
+            return TOGETHER_REASON
+        return self.modes[on[0]].reason if on else ""
 
     def to_dict(self) -> dict:
         data = asdict(self)
         data["modes"] = {key: asdict(m) for key, m in self.modes.items()}
         return data
-
-
-class _Mode:
-    def __init__(self, key):
-        self.key = key
-        self.permitted = False
-        self.start_since = None
-        self.stop_since = None
-
-    def reset_timers(self):
-        self.start_since = None
-        self.stop_since = None
 
 
 class _Probe:
@@ -248,7 +233,6 @@ class _Probe:
 class EnergyManager:
     def __init__(self, settings, *, start_time: float):
         self.s = settings
-        self.modes = {key: _Mode(key) for key in MODES}
         self.probes = {name: _Probe(name) for name in HEATERS}
         self.last_valid = None          # controller time of the last valid data
         self._last_now = float(start_time)
@@ -297,7 +281,6 @@ class EnergyManager:
                    interlocks=interlocks, residual=residual, balance_ok=balance_ok,
                    events=events)
         statuses = {name: self._probe(self.probes[name], **ctx) for name in HEATERS}
-        statuses["both"] = self._mode(self.modes["both"], m, surplus, age, now)
 
         for key in MODES:
             if self._permitted(key) != before[key] and s.solar_permission_enabled:
@@ -335,9 +318,7 @@ class EnergyManager:
     def _permitted(self, key) -> bool:
         if not self.s.solar_permission_enabled:
             return True
-        if key in self.probes:
-            return self.probes[key].permitted
-        return self.modes[key].permitted
+        return self.probes[key].permitted
 
     # ------------------------------------------------------------------
     def _probe(self, p, *, m, surplus, age, now, on, requested, interlocks,
@@ -525,88 +506,3 @@ class EnergyManager:
         log("START", f"Probe started: PV {m.pv_w:.0f} W, SOC {m.soc_percent:.0f} %")
         return status(PROBING, f"Probe: waiting for the {name} output to switch on; "
                       "deadline in", s.probe_switch_on_timeout_s)
-
-    # ------------------------------------------------------------------
-    # Both heaters together: surplus rule (unchanged; reworked with 4 kW).
-    def _mode(self, mode, m, surplus, age, now) -> ModeStatus:
-        s = self.s
-        power = self.power(mode.key)
-        start_need = s.start_surplus_fraction * power
-        stop_need = s.stop_surplus_fraction * power
-        name = MODE_NAMES[mode.key]
-
-        def result(state, reason, timer=None):
-            return ModeStatus(
-                mode=mode.key, power_w=power, permitted=mode.permitted, state=state,
-                reason=reason, start_need_w=start_need, stop_need_w=stop_need,
-                surplus_w=surplus,
-                contribution_percent=None if surplus is None else round(100 * surplus / power, 1),
-                timer_s=None if timer is None else round(max(0.0, timer), 1))
-
-        if not s.solar_permission_enabled:
-            mode.permitted = True
-            mode.reset_timers()
-            return result(DISABLED, "Solar permission switched off in the settings")
-
-        # No usable inverter data --------------------------------------
-        if not m.valid:
-            mode.start_since = None
-            if not mode.permitted:
-                return result(BLOCKED, f"No valid inverter data: {m.reason}")
-            waited = now - self.last_valid if self.last_valid is not None else math.inf
-            if waited >= s.communication_timeout_s:
-                mode.permitted = False
-                mode.stop_since = None
-                return result(BLOCKED, f"Inverter data missing for "
-                              f"{s.communication_timeout_s:g} s: {m.reason}")
-            return result(STOPPING, f"Inverter data missing ({m.reason}); off in",
-                          s.communication_timeout_s - waited)
-
-        soc = m.soc_percent
-        surplus_text = f"Solar surplus {surplus:.0f} W"
-        # Permitted: SOC stop at once, surplus stop after the delay ------
-        if mode.permitted:
-            mode.start_since = None
-            if soc <= s.soc_stop_at_percent:
-                mode.permitted = False
-                mode.stop_since = None
-                return result(BLOCKED, f"Battery SOC {soc:.0f} % <= "
-                              f"{s.soc_stop_at_percent:g} %: {name} stopped")
-            if surplus < stop_need:
-                if mode.stop_since is None:
-                    mode.stop_since = now
-                held = now - mode.stop_since
-                if held >= s.stop_delay_s:
-                    mode.permitted = False
-                    mode.stop_since = None
-                    return result(BLOCKED, f"{surplus_text} < {stop_need:.0f} W "
-                                  f"({s.stop_surplus_fraction:.0%} of {name}) for "
-                                  f"{s.stop_delay_s:g} s: stopped")
-                return result(STOPPING, f"{surplus_text} < {stop_need:.0f} W "
-                              f"({s.stop_surplus_fraction:.0%} of {name}); off in",
-                              s.stop_delay_s - held)
-            mode.stop_since = None
-            return result(PERMITTED, f"{surplus_text} >= {stop_need:.0f} W, "
-                          f"SOC {soc:.0f} %")
-
-        # Not permitted: both start conditions held for the delay ------
-        mode.stop_since = None
-        problems = []
-        if soc < s.soc_start_min_percent:
-            problems.append(f"Battery SOC {soc:.0f} % < {s.soc_start_min_percent:g} %")
-        if surplus < start_need:
-            problems.append(f"{surplus_text} < {start_need:.0f} W "
-                            f"({s.start_surplus_fraction:.0%} of {name})")
-        if problems:
-            mode.start_since = None
-            return result(BLOCKED, "; ".join(problems))
-        if mode.start_since is None:
-            mode.start_since = now
-        held = now - mode.start_since
-        if held >= s.start_delay_s:
-            mode.permitted = True
-            mode.start_since = None
-            return result(PERMITTED, f"{surplus_text} >= {start_need:.0f} W and "
-                          f"SOC {soc:.0f} % for {s.start_delay_s:g} s")
-        return result(STARTING, f"{surplus_text} >= {start_need:.0f} W, SOC {soc:.0f} %; "
-                      f"permitted in", s.start_delay_s - held)

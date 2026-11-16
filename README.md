@@ -275,15 +275,16 @@ under load is measured:
   REQUEST_ENDED, INTERLOCK, HEATER_OFF) with PV, load, battery per inverter,
   SOC, contribution, residual and read times; `ENERGY_PERMISSION` on changes.
 
-**Both heaters together (4 kW)**: unchanged surplus rule (start/stop
-fractions and delays); only possible without the preheat exclusion. To be
-reworked with combined 4 kW heating.
+**Both heaters together (4 kW)**: never permitted; there is no combined
+solar rule yet (the old surplus rule and its `start/stop_surplus_fraction`
+and `start/stop_delay_s` settings were removed: with curtailed PV it could
+not work). A probe on the combined load is planned with the 4 kW heating.
 - **Arbiter rule 4** removes heater requests without permission (note
   `ENERGY_SOLAR` with the reason, `ENERGY_UNKNOWN` without an evaluation). It
   never creates a request; temperature, state-machine and safety interlocks
-  are unchanged. When both heaters are requested and only one may run, the
-  larger permitted one stays. Today they never run together: the preheat
-  exclusion (rule 3) removes the 1 kW while the 3 kW is requested.
+  are unchanged. When both heaters are requested, the larger permitted one
+  stays (both together are never permitted). With the preheat exclusion
+  (rule 3) they are never requested together anyway.
 - **The biogas heating** (`heating_circulation`) is never gated.
 - **Applies in AUTO and MANUAL.** `energy.solar_permission_enabled: false`
   switches the rule off (e.g. commissioning at night).

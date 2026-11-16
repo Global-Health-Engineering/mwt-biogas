@@ -362,9 +362,6 @@ class PlantController:
         e = self.cfg.arbiter.energy
         return {"solar_permission_enabled": e.solar_permission_enabled,
                 "heater_power_w": dict(e.heater_power_w),
-                "start_surplus_fraction": e.start_surplus_fraction,
-                "stop_surplus_fraction": e.stop_surplus_fraction,
-                "start_delay_s": e.start_delay_s, "stop_delay_s": e.stop_delay_s,
                 "soc_start_min_percent": e.soc_start_min_percent,
                 "soc_stop_at_percent": e.soc_stop_at_percent,
                 "communication_timeout_s": e.communication_timeout_s,

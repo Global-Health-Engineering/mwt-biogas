@@ -27,7 +27,7 @@ from pasteurizer.config import load_config
 from pasteurizer.controller.recorder import energy_sample
 from pasteurizer.energy import (
     ARMED, BLOCKED, DISABLED, IDLE, MEASURING, PERMITTED, PROBING, RETRY, RETRY_WAIT,
-    RUNNING, SETTLING, STARTING, STOPPING, EnergyManager, measurements,
+    RUNNING, SETTLING, STOPPING, EnergyManager, measurements,
 )
 from pasteurizer.modes import Mode
 from pasteurizer.output_commands import PERMISSIONED_COMMANDS, OutputCommands, OutputPermissions
@@ -42,8 +42,6 @@ ROOT = Path(__file__).resolve().parents[2]
 # Fixed thresholds for the unit scenarios (the agreed values).
 PROBE = dict(solar_permission_enabled=True, soc_start_min_percent=70.0,
              soc_stop_at_percent=50.0, communication_timeout_s=60.0,
-             start_surplus_fraction=0.20, stop_surplus_fraction=0.15,
-             start_delay_s=120.0, stop_delay_s=120.0,
              probe_min_pv_w=50.0, probe_settle_s=10.0, probe_switch_on_timeout_s=30.0,
              probe_measure_timeout_s=30.0, probe_min_solar_contribution=0.80,
              probe_max_battery_discharge_w=853.0, probe_hold_s=120.0,
@@ -367,7 +365,7 @@ def s118():
     assert set(sample["heaters"]) == {"heater_1kw", "heater_3kw"}
 
 
-@scenario(119, "Arbiter: solar note with the retry countdown; both heaters keep the larger permitted one; biogas never gated")
+@scenario(119, "Arbiter: solar note with the retry countdown; both heaters never together, the larger permitted one stays; biogas never gated")
 def s119():
     config = load_config()
     config = replace(config, arbiter=replace(config.arbiter, energy=SETTINGS))
@@ -400,17 +398,19 @@ def s119():
     result = arbitrate(second, r.status)
     assert not result.commands.heater_1kw and result.commands.heating_circulation
     assert "PV 0 W < 50 W: no probe" in result.blocked("heater_1kw")[0].message
-    # Both requested (only without the preheat exclusion): surplus rule for
-    # both, unchanged; the larger permitted single heater stays.
+    # Both requested (only without the preheat exclusion): never permitted
+    # together (no combined rule yet); the larger permitted heater stays.
     no_exclusion = replace(config, arbiter=replace(config.arbiter, preheat_excluded_outputs=()))
     arbiter = OutputArbiter(no_exclusion, start_time=clock.monotonic())
     r = Rig()
     r.step(30, curtailed(), requests={"heater_3kw"})
-    assert r.mode("heater_3kw").phase == RUNNING and not r.mode("both").permitted
+    assert r.mode("heater_3kw").phase == RUNNING
+    assert not r.status.permitted(["heater_1kw", "heater_3kw"])
+    assert set(r.status.modes) == {"heater_1kw", "heater_3kw"}
     result = arbitrate(OutputCommands(heater_1kw=True, heater_3kw=True), r.status,
                        ProcessState.PREHEAT_3KW)
     assert result.commands.heater_3kw and not result.commands.heater_1kw
-    assert "1 kW + 3 kW not permitted" in result.blocked("heater_1kw")[0].message
+    assert "1 kW + 3 kW together not permitted" in result.blocked("heater_1kw")[0].message
 
 
 def _waiting_night():

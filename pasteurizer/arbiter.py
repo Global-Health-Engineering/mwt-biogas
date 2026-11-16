@@ -16,9 +16,10 @@ Rules, applied in this order every cycle (settings in arbiter_settings.json):
    the solar permission from pasteurizer/energy.py (surplus, SOC, timers,
    inverter data), when energy.solar_permission_enabled is true. The
    permission is checked for exactly the heaters still requested after rule
-   3; when both are requested and only one may run, the larger permitted one
-   stays. Losing the 1 kW permission switches off only the 1 kW. The biogas
-   heating (heating_circulation) is not affected.
+   3; both together are never permitted (no combined rule yet), so when both
+   are requested the larger permitted one stays. Losing the 1 kW permission
+   switches off only the 1 kW. The biogas heating (heating_circulation) is
+   not affected.
 5. Switching pause (break-before-make): the 3 kW heater may only switch on
    when every excluded output has been off in the *written* frames for
    switching_pause_seconds; excluded outputs may only switch on when the
@@ -314,16 +315,16 @@ class OutputArbiter:
             reason = energy.reason(heaters)
             for name in heaters:
                 if name != keep:
-                    block(name, "ENERGY_SOLAR", f"1 kW + 3 kW not permitted: {reason}")
+                    block(name, "ENERGY_SOLAR", reason)
             return
         mode = energy.modes[heaters[0]]
         reason = mode.reason
         if mode.timer_s is not None:
             reason = f"{reason} {clock_text(mode.timer_s)}"
-        # Remaining time when it is known to end with a permission: start delay,
-        # or the retry delay before the next solar probe.
+        # Remaining time when it is known to end with a permission: the retry
+        # delay before the next solar probe.
         block(heaters[0], "ENERGY_SOLAR", reason,
-              mode.timer_s if mode.state in ("STARTING", "RETRY_WAIT") else None)
+              mode.timer_s if mode.state == "RETRY_WAIT" else None)
 
     @staticmethod
     def safe_frame() -> OutputCommands:

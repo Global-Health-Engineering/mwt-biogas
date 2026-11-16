@@ -38,10 +38,9 @@ CYCLE = 0.2
 FAST = dict(bath_heat_capacity_j_k=16_000.0)
 
 # Every Sim has a simulated inverter pair (sunny: 4 kW PV, 80 % SOC, read
-# every 5 s): a requested heater passes the solar probe. The surplus rule for
-# both heaters gets no start delay. The energy scenarios
+# every 5 s): a requested heater passes the solar probe. The energy scenarios
 # (tools/scenarios/energy.py) set their own values.
-SOLAR_DEFAULTS = {"energy.start_delay_s": 0.0}
+SOLAR_DEFAULTS = {}
 
 
 def make_config(control=None, arbiter=None, flow_confirmed=True):
