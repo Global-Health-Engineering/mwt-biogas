@@ -105,13 +105,32 @@ class EnergySettings:
     # Rated electrical power per heater; also what is subtracted from the
     # measured load while that heater is on (no double counting).
     heater_power_w: dict[str, float]
-    start_surplus_fraction: float       # 0.20: 200 / 600 / 800 W
+    # Surplus rule: now only for both heaters together (1 kW + 3 kW); a single
+    # heater gets its permission from the probe below.
+    start_surplus_fraction: float       # 0.20: 800 W for both
     stop_surplus_fraction: float        # 0.15: below this for stop_delay_s -> off
     start_delay_s: float
     stop_delay_s: float
-    soc_start_min_percent: float        # may start at >= 30 %
-    soc_stop_at_percent: float          # stops at once at <= 20 %
-    communication_timeout_s: float      # missing inverter data -> off after this
+    soc_start_min_percent: float        # may start (or probe) at >= this
+    soc_stop_at_percent: float          # off at once at <= this, also during a probe
+    communication_timeout_s: float      # running heater: missing data -> off after this
+    # Probe (single heater): with a heat request, current data, SOC >= start
+    # and PV >= probe_min_pv_w, the heater may switch on as a test; the first
+    # reading of EACH inverter requested probe_settle_s after it was written on
+    # decides: solar contribution >= probe_min_solar_contribution and combined
+    # battery discharge <= probe_max_battery_discharge_w.
+    probe_min_pv_w: float               # below this PV (e.g. 0 W at night): no test
+    probe_settle_s: float               # after the heater output was written on
+    probe_switch_on_timeout_s: float    # granted -> written on (covers the switching pause)
+    probe_measure_timeout_s: float      # settled -> a fresh reading from every inverter
+    probe_min_solar_contribution: float # (PV - other loads) / heater power
+    probe_max_battery_discharge_w: float  # both inverters, background loads included
+    probe_hold_s: float                 # running: too low / too high this long -> off
+    probe_retry_delay_s: float          # after a failed or aborted probe
+    # Diagnostic only (logged, never decides): |PV + battery - load| beyond
+    # max(tolerance_w, tolerance_fraction x load) flags the battery reading.
+    battery_balance_tolerance_w: float
+    battery_balance_tolerance_fraction: float
 
 
 @dataclass(frozen=True)
@@ -399,13 +418,18 @@ def _switched_list(value, where):
 
 
 ENERGY_HEATERS = ("heater_1kw", "heater_3kw")
+PROBE_KEYS = ("probe_min_pv_w", "probe_settle_s", "probe_switch_on_timeout_s",
+              "probe_measure_timeout_s", "probe_min_solar_contribution",
+              "probe_max_battery_discharge_w", "probe_hold_s", "probe_retry_delay_s",
+              "battery_balance_tolerance_w", "battery_balance_tolerance_fraction")
 
 
 def _energy(data, where) -> EnergySettings:
     _exact_keys(data, ("solar_permission_enabled", "heater_power_w",
                        "start_surplus_fraction", "stop_surplus_fraction",
                        "start_delay_s", "stop_delay_s", "soc_start_min_percent",
-                       "soc_stop_at_percent", "communication_timeout_s"), where)
+                       "soc_stop_at_percent", "communication_timeout_s",
+                       *PROBE_KEYS), where)
     powers = _exact_keys(data["heater_power_w"], ENERGY_HEATERS, f"{where}.heater_power_w")
     settings = EnergySettings(
         solar_permission_enabled=_boolean(data["solar_permission_enabled"],
@@ -432,6 +456,33 @@ def _energy(data, where) -> EnergySettings:
         communication_timeout_s=_number(data["communication_timeout_s"],
                                         f"{where}.communication_timeout_s",
                                         minimum=0.0, maximum=3600.0),
+        probe_min_pv_w=_number(data["probe_min_pv_w"], f"{where}.probe_min_pv_w",
+                               minimum=0.0, maximum=20000.0),
+        probe_settle_s=_number(data["probe_settle_s"], f"{where}.probe_settle_s",
+                               minimum=0.0, maximum=600.0),
+        probe_switch_on_timeout_s=_number(data["probe_switch_on_timeout_s"],
+                                          f"{where}.probe_switch_on_timeout_s",
+                                          strictly_positive=True, maximum=3600.0),
+        probe_measure_timeout_s=_number(data["probe_measure_timeout_s"],
+                                        f"{where}.probe_measure_timeout_s",
+                                        strictly_positive=True, maximum=3600.0),
+        probe_min_solar_contribution=_number(data["probe_min_solar_contribution"],
+                                             f"{where}.probe_min_solar_contribution",
+                                             minimum=0.0, maximum=2.0),
+        probe_max_battery_discharge_w=_number(data["probe_max_battery_discharge_w"],
+                                              f"{where}.probe_max_battery_discharge_w",
+                                              minimum=0.0, maximum=20000.0),
+        probe_hold_s=_number(data["probe_hold_s"], f"{where}.probe_hold_s",
+                             minimum=0.0, maximum=3600.0),
+        probe_retry_delay_s=_number(data["probe_retry_delay_s"],
+                                    f"{where}.probe_retry_delay_s",
+                                    minimum=0.0, maximum=86400.0),
+        battery_balance_tolerance_w=_number(data["battery_balance_tolerance_w"],
+                                            f"{where}.battery_balance_tolerance_w",
+                                            minimum=0.0, maximum=100000.0),
+        battery_balance_tolerance_fraction=_number(
+            data["battery_balance_tolerance_fraction"],
+            f"{where}.battery_balance_tolerance_fraction", minimum=0.0, maximum=10.0),
     )
     if settings.stop_surplus_fraction > settings.start_surplus_fraction:
         raise ConfigError(f"{where}: stop_surplus_fraction must not exceed "
@@ -473,6 +524,15 @@ def _arbiter(data, where):
                               f"{where}.preheat_exclusion.excluded_outputs")
     if heater in excluded:
         raise ConfigError(f"{where}.preheat_exclusion: heater cannot exclude itself")
+
+    pause = _number(preheat["switching_pause_seconds"],
+                    f"{where}.preheat_exclusion.switching_pause_seconds",
+                    minimum=0.0, maximum=600.0)
+    if energy.probe_switch_on_timeout_s <= pause:
+        raise ConfigError(
+            f"{where}.energy.probe_switch_on_timeout_s ({energy.probe_switch_on_timeout_s:g} s) "
+            f"must be longer than the switching pause ({pause:g} s): the 3 kW may have to "
+            "wait for it before it is written on")
 
     return ArbiterSettings(
         settings_validated=_boolean(data["settings_validated"],

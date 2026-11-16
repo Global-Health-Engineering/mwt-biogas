@@ -57,9 +57,10 @@ def s122():
     sim.run(5)
     assert sim.status.state == "WAITING_FOR_SOLAR"
 
-    # Sun: after the 120 s start delay the 3 kW preheats.
-    sim.solar.pv_w = 1000.0
-    assert sim.run(140, until=lambda s: s.status.state == "PREHEAT_3KW")
+    # Sun: the solar probe starts at once and the 3 kW preheats (enough PV
+    # under load for the probe to pass: tools/scenarios/energy.py).
+    sim.solar.pv_w = 4000.0
+    assert sim.run(5, until=lambda s: s.status.state == "PREHEAT_3KW")
     sim.run(15)                                     # 10 s switching pause
     assert sim.out("heater_3kw") and sim.status.lamp_modes["green"] == "blinking"
     # Preheating: the pumps are excluded again while the 3 kW is requested.

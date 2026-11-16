@@ -219,4 +219,24 @@ def process_sample(inputs, status) -> dict:
         "release_permitted": status.release_permitted,
         "lights": status.lights,
         "alarms": [a.code for a in status.alarms if a.active],
+        "energy": energy_sample(status),
+    }
+
+
+def energy_sample(status) -> dict | None:
+    """Solar values for the periodic sample, including the battery balance
+    residual (PV + battery - load): diagnostic, to check sign and summing of
+    the battery readings on site."""
+    energy = (status.energy or {}).get("status")
+    if not energy:
+        return None
+    return {
+        "data_valid": energy["data_valid"], "pv_w": energy["pv_w"],
+        "load_w": energy["load_w"], "battery_w": energy["battery_w"],
+        "soc_percent": energy["soc_percent"], "surplus_w": energy["surplus_w"],
+        "balance_residual_w": energy["balance_residual_w"],
+        "balance_ok": energy["balance_ok"],
+        "available_heating_w": energy["available_heating_w"],
+        "heaters": {name: {"state": mode["state"], "phase": mode["phase"]}
+                    for name, mode in energy["modes"].items() if mode.get("phase")},
     }

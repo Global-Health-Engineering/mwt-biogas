@@ -200,6 +200,9 @@ class InverterPoller:
         self._lock = threading.Lock()
         self._reading = None
         self._last_ok = None            # monotonic
+        # Monotonic time when the last good read was requested: the reading
+        # shows the plant no earlier than this (energy.py probe freshness).
+        self._read_at = None
         self._last_ok_utc = None
         self._last_attempt_utc = None
         self._last_duration_s = None
@@ -238,6 +241,7 @@ class InverterPoller:
             self._error = None
             self._reading = reading
             self._last_ok = now
+            self._read_at = started
             self._last_ok_utc = started_wall
             self._last_attempt_utc = started_wall
             self._last_duration_s = round(now - started, 3)
@@ -266,6 +270,7 @@ class InverterPoller:
                 "port": inv["port"], "device_id": inv["device_id"],
                 "state": state, "fresh": state == "OK",
                 "age_s": age, "last_ok_utc": utc_text(self._last_ok_utc),
+                "read_at": self._read_at,     # monotonic, controller clock
                 "last_attempt_utc": utc_text(self._last_attempt_utc),
                 "read_duration_s": self._last_duration_s,
                 "error": self._error, "consecutive_failures": self._failures,

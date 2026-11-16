@@ -59,6 +59,11 @@ from pasteurizer.process_state import HEAT_UP_STATES, TREATMENT_STATES, ProcessS
 
 ISOLATION_COMMAND = "pasteurizer_isolation_open"
 ENERGY_HEATERS = ("heater_1kw", "heater_3kw")
+
+
+def clock_text(seconds) -> str:
+    seconds = max(0, int(math.ceil(seconds)))
+    return f"{seconds // 60}:{seconds % 60:02d}" if seconds >= 60 else f"{seconds} s"
 COMPRESSOR_COMMAND = "biogas_compressor"
 FAN_COMMAND = "cabinet_fan_disabled"
 
@@ -313,9 +318,11 @@ class OutputArbiter:
         mode = energy.modes[heaters[0]]
         reason = mode.reason
         if mode.timer_s is not None:
-            reason = f"{reason} {mode.timer_s:.0f} s"
+            reason = f"{reason} {clock_text(mode.timer_s)}"
+        # Remaining time when it is known to end with a permission: start delay,
+        # or the retry delay before the next solar probe.
         block(heaters[0], "ENERGY_SOLAR", reason,
-              mode.timer_s if mode.state == "STARTING" else None)
+              mode.timer_s if mode.state in ("STARTING", "RETRY_WAIT") else None)
 
     @staticmethod
     def safe_frame() -> OutputCommands:

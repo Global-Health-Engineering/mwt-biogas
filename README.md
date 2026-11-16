@@ -228,27 +228,56 @@ the only Modbus client** (`pasteurizer/solar.py`, one background thread per
 inverter, every 5 s; the scan never waits for Modbus). The GUI shows the data
 from the controller's status (Solar tab, `GET /api/solar`).
 
-    controller --Modbus TCP, read-only--> 192.168.1.158:502, 192.168.1.162:502
+    controller --Modbus TCP, read-only--> inverters in solar_settings.json (port 502)
     controller: energy.py -> arbiter rule 4 -> heater_1kw / heater_3kw
     GUI: /api/solar <- controller status (inverters, permission, reasons)
 
-Rules (`pasteurizer/energy.py`, settings in `arbiter_settings.json` `energy`):
+Rules (`pasteurizer/energy.py`, settings in `arbiter_settings.json` `energy`).
 
-| | 1 kW | 3 kW | both (4 kW) |
-|---|---|---|---|
-| Start: surplus >= 20 % of power, held 120 s | 200 W | 600 W | 800 W |
-| Stop: surplus < 15 % of power for 120 s | 150 W | 450 W | 600 W |
+**Single heater (1 kW or 3 kW): solar probe.** With a full battery the
+inverters curtail PV to what is used, so the surplus with the heater off says
+little. The heater is switched on as a test and the solar power that comes in
+under load is measured:
 
-- **Surplus** = combined PV - other loads, other loads = combined load - rated
-  power of the heaters on in the last written frame (no double counting; the
-  measured load already contains them). Limit: a heater cut out by its own
-  thermostat is still subtracted, so the surplus is then overestimated.
-- **SOC** (lower of the two inverters): start only at >= 30 %, stop at once at
-  <= 20 %; between them a running permission continues.
-- **Inverter data**: both inverters must be current with plausible values. No
-  data: no new permission; a running permission ends after
-  `communication_timeout_s` (60 s). After data returns, the 120 s start delay
-  runs again.
+| Step | Rule (setting, value) |
+|---|---|
+| Start | heat request (AUTO cold start or assist, MANUAL ON), both inverters current, SOC >= `soc_start_min_percent` (70 %), PV >= `probe_min_pv_w` (50 W; 0 W at night: no test), no interlock holding the heater off, no retry delay running |
+| Switch on | until the last written frame has the heater on; deadline `probe_switch_on_timeout_s` (30 s, longer than the 10 s switching pause) |
+| Settle | `probe_settle_s` (10 s) after it was written on |
+| Measure | the next reading of **each** inverter requested after the settle point (`read_at`; a combined value can still hold an older reading of one inverter); deadline `probe_measure_timeout_s` (30 s) |
+| Pass | solar contribution = (PV - other loads) / heater power >= `probe_min_solar_contribution` (0.80) and combined battery discharge <= `probe_max_battery_discharge_w` (853 W, background loads included) -> keeps heating |
+| Fail / abort | heater off, next probe after `probe_retry_delay_s` (10 min), then only with a heat request and PV: probe failed, a deadline missed, inverter data stale during the probe |
+| Running | contribution too low or discharge too high for `probe_hold_s` (120 s) -> off + retry delay; no inverter data for `communication_timeout_s` (60 s) -> off + retry delay |
+| Any time | SOC <= `soc_stop_at_percent` (50 %) -> off at once, also during a probe (on the first reading that shows it; inverters are read every 5 s); heat request ended or an interlock -> probe ends without retry delay |
+
+- **Other loads** = combined load - rated power of the heaters on in the last
+  written frame (no double counting). Limit: a heater cut out by its own
+  thermostat is still subtracted.
+- **Discharge limit**: with consistent readings (PV + battery = load), >= 80 %
+  solar contribution already means at most 20 % of the heater power from the
+  battery (600 W for the 3 kW). The 853 W limit therefore bites when the
+  battery also feeds what the load register does not show (self-consumption,
+  unmetered loads).
+- **Battery sign and summing** (register 190 signed 16 bit, + = discharging;
+  sum of both inverters, only when both are current): the balance residual
+  PV + battery - load is **diagnostic only**: shown on the Solar tab, in every
+  `ENERGY_PROBE` event and in the periodic samples (`energy`), flagged beyond
+  max(`battery_balance_tolerance_w`, `battery_balance_tolerance_fraction` x
+  load) (300 W, 25 %). An inverted sign shows as about twice the load. The
+  installed inverters must still be checked on site with real charging and
+  discharging readings.
+- **Status**: the status line and the Treatment card show what the electric
+  heating waits for (`heating_wait`: probe phase and deadline, retry
+  countdown, missing PV / SOC); blocked heaters carry the same text in their
+  `ENERGY_SOLAR` note (with the retry time as `remaining_s`).
+- **Event log**: `ENERGY_PROBE` (START, ON, PASS, FAIL, STALE,
+  SWITCH_ON_TIMEOUT, MEASURE_TIMEOUT, HOLD_FAIL, COMM_TIMEOUT, SOC_CUTOFF,
+  REQUEST_ENDED, INTERLOCK, HEATER_OFF) with PV, load, battery per inverter,
+  SOC, contribution, residual and read times; `ENERGY_PERMISSION` on changes.
+
+**Both heaters together (4 kW)**: unchanged surplus rule (start/stop
+fractions and delays); only possible without the preheat exclusion. To be
+reworked with combined 4 kW heating.
 - **Arbiter rule 4** removes heater requests without permission (note
   `ENERGY_SOLAR` with the reason, `ENERGY_UNKNOWN` without an evaluation). It
   never creates a request; temperature, state-machine and safety interlocks
@@ -258,6 +287,10 @@ Rules (`pasteurizer/energy.py`, settings in `arbiter_settings.json` `energy`):
 - **The biogas heating** (`heating_circulation`) is never gated.
 - **Applies in AUTO and MANUAL.** `energy.solar_permission_enabled: false`
   switches the rule off (e.g. commissioning at night).
+- **AUTO cold start**: WAITING_FOR_SOLAR is the 3 kW heat request; when the
+  probe may start, the permission is granted before the heater is on and the
+  state moves to PREHEAT_3KW; a failed probe returns to WAITING_FOR_SOLAR and
+  the retry delay holds.
 - **WAITING_FOR_SOLAR**: a cold start (AUTO, every start check passed, PT5
   below the cold-start limit) without solar permission for the 3 kW waits
   in this state instead of PREHEAT_3KW; nothing heats and the transition
@@ -414,7 +447,8 @@ What is running on the RevPi (read-only checks):
     python3 tools/control_scenarios.py 88 89 90 91 92 93 94 95 96   # outputs, AUTO, commands, logins, watchdog
     python3 tools/control_scenarios.py 97 98 99 100 101 102 103 104 105 # requests, drain, stops, crashes, flow guard
     python3 tools/control_scenarios.py 110 111 112 113                # inverter reading, Solar tab data
-    python3 tools/control_scenarios.py 114 115 116 117 118 119 120 121 # solar permission (121: fake Modbus inverters)
+    python3 tools/control_scenarios.py 114 115 116 117 118 119 120 121 # solar probe (121: fake Modbus inverters)
+    python3 tools/control_scenarios.py 124 125 126                    # probe: MANUAL, high discharge, stale data
     python3 tools/control_scenarios.py 122 123                        # WAITING_FOR_SOLAR, green double blink
     python3 tools/control_scenarios.py 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68   # historian only
     python3 tools/simulate_plant.py         # timeline of a simulated cold start

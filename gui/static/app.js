@@ -69,7 +69,8 @@ function renderHeader() {
   const last = isLive() ? "" : " (last snapshot)";
   $("#mode").textContent = `Mode ${mode === "UNKNOWN" ? "INVALID" : mode}${last}`;
   $("#state").innerHTML = st
-    ? `<b>${UI.esc(st.state)}</b>${st.path ? ` · ${UI.esc(st.path)} path` : ""}<span class="reason">${UI.esc(st.state_reason)}${last}</span>`
+    ? `<b>${UI.esc(st.state)}</b>${st.path ? ` · ${UI.esc(st.path)} path` : ""}<span class="reason">${UI.esc(st.state_reason)}${last}</span>` +
+      (st.heating_wait ? `<span class="reason heating-wait">Solar: ${UI.esc(st.heating_wait)}${last}</span>` : "")
     : "—";
 
   const modes = st ? st.lamp_modes : {};
@@ -220,6 +221,7 @@ function renderCard() {
     card.innerHTML = `<h2>Treatment</h2>
       <div class="status-word ${live ? cls : "stale"}">${live ? text : "Unknown (stale data)"}</div>
       <p class="reason">${UI.esc(st.state_reason)}</p>
+      ${st.heating_wait ? `<p class="reason heating-wait">Electric heating waits: ${UI.esc(st.heating_wait)}</p>` : ""}
       ${timers.map((t) => `<p>${UI.esc(t)}</p>`).join("")}
       ${isShadow(st) ? `<p class="note">Outputs disabled (shadow run): no command is written, no treatment takes place.</p>` : ""}
       <h3>Model</h3>${modelBlock(st)}

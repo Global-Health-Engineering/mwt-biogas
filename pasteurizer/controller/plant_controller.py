@@ -29,7 +29,7 @@ from pasteurizer.controller.state_machine import ProcessStateMachine
 from pasteurizer.controller.status import ControllerStatus, build_status
 from pasteurizer.controller.treatment import TreatmentLogic
 from pasteurizer.controller.y4_monitor import Y4Monitor
-from pasteurizer.energy import HEATERS, EnergyManager
+from pasteurizer.energy import HEATERS, NOT_INTERLOCKS, EnergyManager
 from pasteurizer.event_log import EventLog
 from pasteurizer.fault_manager import FaultManager
 from pasteurizer.model_interface import ModelResult, ModelSupervisor
@@ -101,6 +101,10 @@ class PlantController:
         self.requests = OutputRequestBuilder(config)
         self.arbiter = OutputArbiter(config, start_time=now)
         self.energy = EnergyManager(config.arbiter.energy, start_time=now)
+        # Last cycle's requested frame and arbitration notes: the heat requests
+        # and interlocks the solar probe sees (energy.update runs before them).
+        self._last_requested = None
+        self._last_notes = ()
         self.recorder = CycleRecorder(self.log, self.faults, control.logging,
                                       start_time=now, outputs_enabled=self.outputs_enabled,
                                       config=config)
@@ -226,12 +230,13 @@ class PlantController:
         written = self.arbiter.last_written
         energy, energy_events = self.energy.update(
             solar_view, None if written is None else
-            {name: getattr(written, name) for name in HEATERS}, now)
+            {name: getattr(written, name) for name in HEATERS}, now,
+            requests=self._heat_requests(), interlocks=self._heater_interlocks())
         for kind, data in energy_events:
             self.log.record(kind, **data)
         self.process.step(inputs, flags, self.arbiter.last_written,
                           solar_3kw=(energy.permitted(["heater_3kw"]),
-                                     energy.reason(["heater_3kw"])))
+                                     self._solar_3kw_reason(energy)))
         flags = self.evaluator.flags(inputs)     # the step may latch a fault
 
         requests = self.requests.build(inputs, flags, self.process, self.manual,
@@ -248,6 +253,8 @@ class PlantController:
             requests.commands, requests.permissions, indicators, now,
             energy=energy, plant_safe=flags.summary.plant_trip)
 
+        self._last_requested = requests.commands
+        self._last_notes = result.notes
         write_ok = self._write(result.commands, now)
         self.recorder.write_result(result.commands, write_ok, indicators,
                                    flags.summary.plant_trip)
@@ -264,7 +271,8 @@ class PlantController:
             model_enabled=self.cfg.control.model_control_enabled,
             outputs_enabled=self.outputs_enabled,
             energy={"status": energy.to_dict(), "solar": solar_view,
-                    "settings": self._energy_settings()})
+                    "settings": self._energy_settings()},
+            heating_wait=energy.waiting)
         self.recorder.requested(self.status, requests.explanations)
         self.recorder.model(inputs)
         self.recorder.periodic(inputs, self.status)
@@ -276,6 +284,35 @@ class PlantController:
         return self.status
 
     # ------------------------------------------------------------------
+    def _heat_requests(self) -> dict:
+        """Heat request per electric heater: the AUTO cold start (waiting for
+        solar or preheating) for the 3 kW, otherwise last cycle's requested
+        frame (AUTO assist, MANUAL ON)."""
+        last = self._last_requested
+        requests = {name: bool(last is not None and getattr(last, name)) for name in HEATERS}
+        if self.process.state.value in ("WAITING_FOR_SOLAR", "PREHEAT_3KW"):
+            requests["heater_3kw"] = True
+        return requests
+
+    def _heater_interlocks(self) -> dict:
+        """Heaters another arbitration rule held off last cycle (not the energy
+        rule, not the switching pause): such an interlock ends a probe."""
+        return {n.output: f"{n.rule}: {n.message}" for n in self._last_notes
+                if n.output in HEATERS and n.rule not in NOT_INTERLOCKS}
+
+    @staticmethod
+    def _solar_3kw_reason(energy) -> str:
+        """Why the 3 kW has no solar permission, for the state transition. Before
+        the cold start there is no heat request yet: name what else is missing."""
+        mode = energy.modes["heater_3kw"]
+        if mode.state == "RETRY_WAIT":           # live countdown: status heating_wait
+            last = (mode.probe.get("last") or {}).get("reason", "solar probe ended")
+            return f"{last}; next probe after the retry delay"
+        if "heater_3kw" in energy.requests or mode.permitted:
+            return mode.reason
+        blockers = mode.probe.get("start_blockers") or []
+        return "; ".join(blockers) if blockers else "solar probe starts with the heat request"
+
     def _solar_view(self):
         if self.solar is None:
             return None
@@ -294,6 +331,14 @@ class PlantController:
                 "soc_start_min_percent": e.soc_start_min_percent,
                 "soc_stop_at_percent": e.soc_stop_at_percent,
                 "communication_timeout_s": e.communication_timeout_s,
+                "probe_min_pv_w": e.probe_min_pv_w, "probe_settle_s": e.probe_settle_s,
+                "probe_switch_on_timeout_s": e.probe_switch_on_timeout_s,
+                "probe_measure_timeout_s": e.probe_measure_timeout_s,
+                "probe_min_solar_contribution": e.probe_min_solar_contribution,
+                "probe_max_battery_discharge_w": e.probe_max_battery_discharge_w,
+                "probe_hold_s": e.probe_hold_s, "probe_retry_delay_s": e.probe_retry_delay_s,
+                "battery_balance_tolerance_w": e.battery_balance_tolerance_w,
+                "battery_balance_tolerance_fraction": e.battery_balance_tolerance_fraction,
                 "preheat_max_heating_s": self.cfg.control.preheat.max_duration_s,
                 "preheat_heating_s": round(self.process.preheat_heated_s, 1)
                 if self.process.state.value in ("PREHEAT_3KW", "WAITING_FOR_SOLAR")

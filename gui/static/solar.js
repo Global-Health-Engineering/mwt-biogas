@@ -118,7 +118,7 @@ const SOLAR = (() => {
         <div id="energy-note" class="muted energy-note"></div>
         <div class="energy-tiles" id="energy-tiles"></div>
         <table class="solar-table energy-table"><thead><tr><th>Heaters</th><th>Power</th>
-          <th>Start needs</th><th>Stops below</th><th>Surplus share</th><th>Permission</th><th>Reason</th></tr></thead>
+          <th>Start needs</th><th>Stops when</th><th>Surplus share</th><th>Permission</th><th>Reason</th></tr></thead>
           <tbody id="energy-modes"><tr><td colspan="7" class="muted">Waiting for data…</td></tr></tbody></table>
         <table class="solar-table energy-table"><thead><tr><th>Heater</th><th>Requested</th>
           <th>Commanded</th><th>Written</th><th>Blocked by</th></tr></thead>
@@ -283,16 +283,19 @@ const SOLAR = (() => {
     const old = current ? "" : " (last received)";
     note.textContent = !e.enabled
       ? "Solar permission switched off in arbiter_settings.json: electric heaters follow the other interlocks only."
-      : `Electric heaters run only with solar permission: start at ≥ ${pct(set.start_surplus_fraction)} of their power ` +
-        `as surplus and SOC ≥ ${set.soc_start_min_percent} % for ${set.start_delay_s} s; stop below ` +
-        `${pct(set.stop_surplus_fraction)} for ${set.stop_delay_s} s or at SOC ≤ ${set.soc_stop_at_percent} % at once; ` +
-        `no inverter data for ${set.communication_timeout_s} s stops them. Biogas heating is not affected.`;
+      : `Single heater: with a heat request, current data, SOC ≥ ${set.soc_start_min_percent} % and PV ≥ ` +
+        `${set.probe_min_pv_w} W it is switched on as a test; ${set.probe_settle_s} s after it is written on, the next ` +
+        `reading of each inverter must show ≥ ${pct(set.probe_min_solar_contribution)} solar contribution and ≤ ` +
+        `${set.probe_max_battery_discharge_w} W battery discharge. Failed or aborted test: next one after ` +
+        `${Math.round(set.probe_retry_delay_s / 60)} min. Running: off when too low / too high for ${set.probe_hold_s} s, ` +
+        `at SOC ≤ ${set.soc_stop_at_percent} % at once, or after ${set.communication_timeout_s} s without data. ` +
+        `Biogas heating is not affected.`;
 
     const requested = Object.entries(body.heaters || {}).filter(([, h]) => h.requested).map(([n]) => n);
-    const basis = requested.length ? requested : e.heaters_on;
+    const basis = requested.length ? requested : (e.requests && e.requests.length ? e.requests : e.heaters_on);
     const basisW = basis.reduce((sum, n) => sum + ((set.heater_power_w || {})[n] || 0), 0);
     const contribution = e.surplus_w != null && basisW ? `${Math.round((100 * e.surplus_w) / basisW)} %` : "—";
-    const contribSub = basisW ? `of ${basis.map((n) => MODE_LABEL[n]).join(" + ")} ${requested.length ? "requested" : "on"}` : "no electric heater requested";
+    const contribSub = basisW ? `of ${basis.map((n) => MODE_LABEL[n]).join(" + ")} ${requested.length || (e.requests || []).length ? "requested" : "on"}` : "no electric heater requested";
     const data = e.data_valid ? "inverter data current"
       : `NO VALID DATA${e.data_age_s != null ? ` for ${Math.round(e.data_age_s)} s` : ""}: ${e.data_reason}`;
     const soc = e.soc_percent == null ? "—" : `${Math.round(e.soc_percent)} %`;
@@ -306,21 +309,39 @@ const SOLAR = (() => {
       tile("Available heating power", e.available_heating_w ? `${(e.available_heating_w / 1000).toFixed(0)} kW` : "0 kW",
            e.available_heating_w ? "largest permitted heater set" : "no electric heating permitted",
            e.available_heating_w ? "good" : "bad") +
+      tile("Battery balance (diagnostic)", e.balance_residual_w == null ? "—" : `${e.balance_residual_w} W`,
+           `PV + battery − load; ${e.balance_ok === false ? "OUTSIDE tolerance: check battery sign/summing" : "within tolerance"}` +
+           ` (± max(${set.battery_balance_tolerance_w} W, ${pct(set.battery_balance_tolerance_fraction)} of load))`,
+           e.balance_ok === false ? "bad" : "") +
       (set.preheat_heating_s != null ? tile("3 kW preheat heating time", `${(set.preheat_heating_s / 60).toFixed(0)} min`,
            `trips at ${(set.preheat_max_heating_s / 3600).toFixed(1)} h of heating (waiting for sun not counted)`) : "");
 
+    const clock = (s) => { s = Math.max(0, Math.ceil(s)); return s >= 60 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}` : `${s} s`; };
     const stateText = (m) => {
-      const t = m.timer_s != null ? ` (${Math.ceil(m.timer_s)} s)` : "";
+      const t = m.timer_s != null ? ` (${clock(m.timer_s)})` : "";
       return { PERMITTED: "PERMITTED", STARTING: `STARTING${t}`, STOPPING: `STOPPING${t}`,
-               BLOCKED: "BLOCKED", DISABLED: "RULE OFF" }[m.state] || m.state;
+               BLOCKED: "BLOCKED", DISABLED: "RULE OFF",
+               PROBING: `TEST ${m.phase || ""}${t}`, RETRY_WAIT: `RETRY${t}` }[m.state] || m.state;
     };
+    const lastProbe = (m) => {
+      const last = m.probe && m.probe.last;
+      if (!last || !last.result) return "";
+      const res = last.balance_residual_w == null ? "" :
+        ` · balance PV + battery − load ${Math.round(last.balance_residual_w)} W${last.balance_ok === false ? " (outside tolerance: check battery sign/sum)" : ""}`;
+      return `<div class="small muted">Last: ${esc(last.result)} — ${esc(last.reason)}${esc(res)}</div>`;
+    };
+    const needs = (key, m) => key === "both"
+      ? [`≥ ${W_(m.start_need_w)} surplus`, `&lt; ${W_(m.stop_need_w)}`]
+      : [`test: ≥ ${pct(set.probe_min_solar_contribution)} solar, ≤ ${W_(set.probe_max_battery_discharge_w)} battery`,
+         `same, ${set.probe_hold_s} s`];
     q("#energy-modes").innerHTML = ["heater_1kw", "heater_3kw", "both"].map((key) => {
       const m = (e.modes || {})[key];
       if (!m) return "";
       const cls = m.permitted ? "good-text" : "bad-text";
-      return `<tr><td><b>${MODE_LABEL[key]}</b></td><td>${W_(m.power_w)}</td><td>≥ ${W_(m.start_need_w)}</td>
-        <td>&lt; ${W_(m.stop_need_w)}</td><td>${m.contribution_percent == null ? "—" : `${Math.round(m.contribution_percent)} %`}</td>
-        <td class="${cls}"><b>${esc(stateText(m))}</b></td><td class="wrap">${esc(m.reason)}${m.timer_s != null && m.state !== "BLOCKED" ? ` ${Math.ceil(m.timer_s)} s` : ""}</td></tr>`;
+      const [start, stop] = needs(key, m);
+      return `<tr><td><b>${MODE_LABEL[key]}</b></td><td>${W_(m.power_w)}</td><td>${start}</td>
+        <td>${stop}</td><td>${m.contribution_percent == null ? "—" : `${Math.round(m.contribution_percent)} %`}</td>
+        <td class="${cls}"><b>${esc(stateText(m))}</b></td><td class="wrap">${esc(m.reason)}${m.timer_s != null && m.state !== "BLOCKED" ? ` ${clock(m.timer_s)}` : ""}${lastProbe(m)}</td></tr>`;
     }).join("") + (e.modes && e.modes.both ? `<tr><td colspan="7" class="small muted">1 kW + 3 kW never run together today:
       the preheat exclusion (arbiter rule 3) removes the 1 kW while the 3 kW is requested.</td></tr>` : "");
 

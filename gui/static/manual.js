@@ -67,7 +67,7 @@ const MANUAL = (() => {
   }
 
   async function request(cmd, value) {
-    wanted[cmd] = { value, sent: Date.now() };
+    wanted[cmd] = { value, sent: Date.now(), pressed: Date.now() };
     if (!(await send("manual_request", { command: cmd, value }))) delete wanted[cmd];
   }
 
@@ -151,14 +151,11 @@ const MANUAL = (() => {
   function actionButtons(cmd, enabled) {
     const dis = enabled ? "" : "disabled";
     return cmd === DRAIN
-      ? `<button data-on="${cmd}" data-value="0" class="danger" ${dis}>STOP (inhibit)</button>
-         <button data-off="${cmd}" class="secondary" ${dis}>Automatic</button>`
+      ? `<span class="toggle"><button data-on="${cmd}" data-value="0" class="tg tg-stop" ${dis}>STOP (inhibit)</button><button data-off="${cmd}" class="tg tg-off" ${dis}>Automatic</button></span>`
       : cmd === "control_valve_percent"
       ? `<input type="number" min="0" max="100" step="1" value="0" data-y4-input ${dis}> %
-         <button data-set="${cmd}" ${dis}>Set</button>
-         <button data-off="${cmd}" class="secondary" ${dis}>Close (release)</button>`
-      : `<button data-on="${cmd}" ${dis}>${isValve(cmd) ? "Open" : "ON"}</button>
-         <button data-off="${cmd}" class="secondary" ${dis}>${isValve(cmd) ? "Close" : "OFF"}</button>`;
+         <span class="toggle"><button data-set="${cmd}" class="tg tg-on" ${dis}>Set</button><button data-off="${cmd}" class="tg tg-off" ${dis}>Close (release)</button></span>`
+      : `<span class="toggle"><button data-on="${cmd}" class="tg tg-on" ${dis}>${isValve(cmd) ? "Open" : "ON"}</button><button data-off="${cmd}" class="tg tg-off" ${dis}>${isValve(cmd) ? "Close" : "OFF"}</button></span>`;
   }
 
   function overrideButtons(sw, enabled) {
@@ -168,13 +165,33 @@ const MANUAL = (() => {
       <button data-ov="${sw}" data-val="" class="secondary" ${dis}>Cancel</button>`;
   }
 
+  /* Show on the buttons what is selected: the pressed side is filled; while the
+     controller has not yet followed it pulses, and if an interlock holds the
+     command elsewhere it turns amber. */
+  const PENDING_MS = 3000;
+  function paintButtons(root, cmd) {
+    const s = st(), w = wanted[cmd];
+    const commanded = s && s.commanded ? s.commanded[cmd] : undefined;
+    const followed = w && (cmd === "control_valve_percent"
+      ? Math.abs(Number(commanded) - Number(w.value)) < 0.5 : commanded === w.value);
+    const fresh = w && Date.now() - w.pressed < PENDING_MS;
+    const on = $(`[data-on="${cmd}"], [data-set="${cmd}"]`, root), off = $(`[data-off="${cmd}"]`, root);
+    if (!on || !off) return;
+    on.classList.toggle("selected", !!w);
+    off.classList.toggle("selected", !w);
+    on.classList.toggle("pending", !!w && !followed && fresh);
+    on.classList.toggle("held", !!w && !followed && !fresh);
+    on.title = w && !followed && !fresh ? "Requested, but the controller holds the command (interlock or permission)" : "";
+  }
+
   /* Wire the buttons inside one container only. */
   function bind(root) {
-    for (const b of $$("[data-on]", root)) b.onclick = () => request(b.dataset.on, b.dataset.value !== "0");
-    for (const b of $$("[data-off]", root)) b.onclick = () => release(b.dataset.off);
+    const repaint = (cmd) => { for (const r of [$("#view-manual"), document.getElementById("card-manual")]) if (r) paintButtons(r, cmd); };
+    for (const b of $$("[data-on]", root)) b.onclick = async () => { const p = request(b.dataset.on, b.dataset.value !== "0"); repaint(b.dataset.on); await p; repaint(b.dataset.on); };
+    for (const b of $$("[data-off]", root)) b.onclick = async () => { const p = release(b.dataset.off); repaint(b.dataset.off); await p; repaint(b.dataset.off); };
     for (const b of $$("[data-set]", root)) b.onclick = () => {
       const value = Number($("[data-y4-input]", root).value);
-      if (Number.isFinite(value) && value >= 0 && value <= 100) request(b.dataset.set, value);
+      if (Number.isFinite(value) && value >= 0 && value <= 100) { request(b.dataset.set, value); paintButtons(root, b.dataset.set); }
       else { message = { text: "Y4 position must be 0-100 %", ok: false }; showMessage(); }
     };
     for (const b of $$("[data-ov]", root)) b.onclick = () => override(b.dataset.ov, b.dataset.val === "" ? null : b.dataset.val === "1");
@@ -238,6 +255,7 @@ const MANUAL = (() => {
       const alarms = (s.alarms || []).filter((a) => (a.equipment || []).includes(cmd)).map((a) => a.code);
       $("[data-cell=note]", row).textContent = [...notes, ...alarms].join(" · ");
       row.classList.toggle("row-active", !!w);
+      paintButtons(row, cmd);
     }
     const levels = (s.signals && s.signals.levels) || {};
     for (const row of $$("[data-level]")) {
@@ -293,6 +311,7 @@ const MANUAL = (() => {
       const notes = (s.arbitration_notes || []).filter((n) => n.output === id).map((n) => n.message);
       const alarms = (s.alarms || []).filter((a) => (a.equipment || []).includes(id)).map((a) => a.code);
       cell("note").textContent = [...notes, ...alarms].join(" · ") || "—";
+      paintButtons(box, id);
     } else {
       const lv = ((s.signals && s.signals.levels) || {})[id];
       const real = id in (s.override_actual || {}) ? s.override_actual[id] : lv && lv.valid ? lv.reached : null;

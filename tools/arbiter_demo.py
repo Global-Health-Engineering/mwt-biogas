@@ -149,18 +149,22 @@ def solar(pv, load, soc=80):
             "totals": {"complete": True, "pv_w": pv, "load_w": load, "battery_w": load - pv}}
 
 
-energy = EnergyManager(replace(solar_config.arbiter.energy, start_delay_s=0.0),
+energy = EnergyManager(replace(solar_config.arbiter.energy, soc_start_min_percent=70.0,
+                               soc_stop_at_percent=50.0, probe_min_pv_w=50.0),
                        start_time=clock.monotonic())
 arbiter = make_arbiter(solar_config)
 heat = OutputCommands(heater_3kw=True)
 run(arbiter, OutputCommands(), seconds=10.4)
-status, _ = energy.update(solar(pv=800, load=300), {}, clock.monotonic())
-assert status.modes["heater_3kw"].permitted is False      # 500 W < 600 W
+wants = {"heater_3kw": True}
+status, _ = energy.update(solar(pv=0, load=300), {}, clock.monotonic(), requests=wants)
+assert status.modes["heater_3kw"].permitted is False      # 0 W PV: no probe
 assert rules(run(arbiter, heat, energy=status), "heater_3kw") == ["ENERGY_SOLAR"]
 assert rules(run(arbiter, heat), "heater_3kw") == ["ENERGY_UNKNOWN"]
-status, _ = energy.update(solar(pv=1000, load=300), {}, clock.monotonic())
-assert run(arbiter, heat, energy=status).commands.heater_3kw is True   # 700 W >= 600 W
-print("7. Solar permission: the 3 kW needs 600 W surplus; no evaluation, no heating.")
+status, _ = energy.update(solar(pv=300, load=300), {}, clock.monotonic(), requests=wants)
+assert status.modes["heater_3kw"].phase == "ARMED"         # curtailed PV: probe granted
+assert run(arbiter, heat, energy=status).commands.heater_3kw is True
+print("7. Solar permission: no PV, no probe; PV present, the 3 kW may switch on as a test; "
+      "no evaluation, no heating.")
 
 # 8. Write failure restarts the pause ---------------------------------------
 arbiter = make_arbiter()

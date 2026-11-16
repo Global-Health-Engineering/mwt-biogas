@@ -37,9 +37,10 @@ CYCLE = 0.2
 # Fast bath: ~1 K every 5 s at 3 kW (PRETEND, keeps scenarios short).
 FAST = dict(bath_heat_capacity_j_k=16_000.0)
 
-# Every Sim has a simulated inverter pair (sunny: 4 kW PV, 80 % SOC) and, so
-# that scenarios about other things are not delayed, no solar start delay.
-# The energy scenarios (tools/scenarios/energy.py) set their own values.
+# Every Sim has a simulated inverter pair (sunny: 4 kW PV, 80 % SOC, read
+# every 5 s): a requested heater passes the solar probe. The surplus rule for
+# both heaters gets no start delay. The energy scenarios
+# (tools/scenarios/energy.py) set their own values.
 SOLAR_DEFAULTS = {"energy.start_delay_s": 0.0}
 
 
@@ -124,7 +125,7 @@ class Sim:
         self.log = EventLog(self.historian, clock=self.clock, wall_clock=self.wall,
                             clock_sync=lambda: self.clock_sync)
         # Simulated inverters; their load includes the heaters the plant has on.
-        self.solar = solar if solar is not None else SimulatedSolar(self.plant)
+        self.solar = solar if solar is not None else SimulatedSolar(self.plant, clock=self.clock.monotonic)
         self.watchdog = SoftwareWatchdog(self.config.control.watchdog.heartbeat_timeout_s,
                                          self._watchdog_trip)
         self.ctl = PlantController(self.config, reader=self.plant, writer=self.plant,

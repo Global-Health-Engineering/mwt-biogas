@@ -45,8 +45,15 @@ class FakeInverters:
         return list(answer)
 
 
+# Fixed test inverters: independent of the site addresses in solar_settings.json.
+TEST_SOLAR = {"enabled": True, "poll_s": 5.0, "timeout_s": 3.0, "stale_after_s": 15.0,
+              "soc_mismatch_pct": 2, "battery_charge_sign_verified": False,
+              "inverters": [{"id": "inverter_1", "name": "Inverter 1", "host": "192.168.1.158"},
+                            {"id": "inverter_2", "name": "Inverter 2", "host": "192.168.1.162"}]}
+
+
 def rig():
-    settings = load_settings(ROOT / "config" / "solar_settings.json")
+    settings = check_settings(TEST_SOLAR)
     fake, t = FakeInverters(), [0.0]
     link = SolarLink(settings, reader=fake, clock=lambda: t[0], wall=lambda: 1.8e9 + t[0])
     return settings, fake, t, link
@@ -72,8 +79,9 @@ def s110():
     assert solar_module.battery_direction(5) == "IDLE"
     # The shipped settings: both inverters, 5 s poll, charge sign not verified.
     settings = load_settings(ROOT / "config" / "solar_settings.json")
-    assert [(i["host"], i["port"], i["device_id"]) for i in settings["inverters"]] == [
-        ("192.168.1.158", 502, 1), ("192.168.1.162", 502, 1)]
+    assert [(i["id"], i["port"], i["device_id"]) for i in settings["inverters"]] == [
+        ("inverter_1", 502, 1), ("inverter_2", 502, 1)]
+    assert all(i["host"].startswith("192.168.1.") for i in settings["inverters"])
     assert settings["poll_s"] == 5.0 and settings["battery_charge_sign_verified"] is False
     good = {"inverters": [{"id": "a", "name": "A", "host": "10.0.0.1"}]}
     assert check_settings(good)["inverters"][0]["port"] == 502
@@ -104,6 +112,8 @@ def s111():
     assert fake.calls[0] == ("192.168.1.158", 502, 1, 3.0)
     v = link.view()
     assert [i["state"] for i in v["inverters"]] == ["OK", "OK"]
+    # read_at: controller time the reading was requested (probe freshness).
+    assert [i["read_at"] for i in v["inverters"]] == [0.0, 0.0]
     assert v["totals"]["battery_w"] == 1195 and v["totals"]["battery_direction"] == "DISCHARGING"
     assert v["totals"]["pv_w"] == 1230 and v["totals"]["load_w"] == 1420
     assert v["totals"]["complete"] and v["totals"]["missing"] == []
@@ -224,7 +234,8 @@ def s113():
         heater = body["heaters"]["heater_1kw"]
         assert heater["requested"] and not heater["commanded"]
         assert heater["notes"][0]["rule"] == "ENERGY_SOLAR"
-        assert body["settings"]["start_surplus_fraction"] == 0.2
+        assert {"probe_min_solar_contribution", "probe_max_battery_discharge_w",
+                "probe_retry_delay_s"} <= set(body["settings"])
         assert request(gui.port, "/api/solar", "POST")[0] == 405          # read-only
         code, body = request(offline.port, "/api/solar")
         assert code == 200 and body["solar"] is None and body["energy"] is None

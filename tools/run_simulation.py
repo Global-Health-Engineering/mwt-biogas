@@ -131,7 +131,7 @@ def main():
 
     watchdog = SoftwareWatchdog(config.control.watchdog.heartbeat_timeout_s, watchdog_trip)
     # Simulated inverter pair (sunny: 4 kW PV, 80 % SOC) for the solar permission.
-    solar = SimulatedSolar(plant)
+    solar = SimulatedSolar(plant, clock=clock.monotonic)
     ctl = PlantController(config, reader=plant, writer=plant, store=FileStore(args.state),
                           event_log=log, clock=clock, simulated_io=True,
                           heartbeat=watchdog.heartbeat, publish=publisher.publish,
