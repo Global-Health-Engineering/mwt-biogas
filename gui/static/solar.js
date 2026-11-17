@@ -120,6 +120,9 @@ const SOLAR = (() => {
         <table class="solar-table energy-table"><thead><tr><th>Heaters</th><th>Power</th>
           <th>Start needs</th><th>Stops when</th><th>Surplus share</th><th>Permission</th><th>Reason</th></tr></thead>
           <tbody id="energy-modes"><tr><td colspan="7" class="muted">Waiting for data…</td></tr></tbody></table>
+        <div class="energy-actions" id="energy-actions" hidden>
+          <button type="button" id="energy-retry">Retry now</button>
+          <span id="energy-retry-note" class="small muted"></span></div>
         <table class="solar-table energy-table"><thead><tr><th>Heater</th><th>Requested</th>
           <th>Commanded</th><th>Written</th><th>Blocked by</th></tr></thead>
           <tbody id="energy-heaters"></tbody></table>
@@ -278,6 +281,7 @@ const SOLAR = (() => {
       q("#energy-tiles").innerHTML = "";
       q("#energy-modes").innerHTML = `<tr><td colspan="7" class="muted">—</td></tr>`;
       q("#energy-heaters").innerHTML = "";
+      renderRetry(null);
       return;
     }
     const old = current ? "" : " (last received)";
@@ -314,7 +318,7 @@ const SOLAR = (() => {
            ` (± max(${set.battery_balance_tolerance_w} W, ${pct(set.battery_balance_tolerance_fraction)} of load))`,
            e.balance_ok === false ? "bad" : "") +
       (set.preheat_heating_s != null ? tile("3 kW preheat heating time", `${(set.preheat_heating_s / 60).toFixed(0)} min`,
-           `trips at ${(set.preheat_max_heating_s / 3600).toFixed(1)} h of heating (waiting for sun not counted)`) : "");
+           `trips at ${(set.preheat_max_heating_s / 3600).toFixed(1)} h of heating`) : "");
 
     const clock = (s) => { s = Math.max(0, Math.ceil(s)); return s >= 60 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}` : `${s} s`; };
     const stateText = (m) => {
@@ -344,6 +348,8 @@ const SOLAR = (() => {
     }).join("") + (e.modes ? `<tr><td colspan="7" class="small muted">1 kW + 3 kW together: not permitted
       (no combined solar rule yet). The preheat exclusion also removes the 1 kW while the 3 kW is requested.</td></tr>` : "");
 
+    renderRetry(e);
+
     q("#energy-heaters").innerHTML = Object.entries(body.heaters || {}).map(([name, h]) => {
       const notes = (h.notes || []).map((n) => `${n.rule}: ${n.message}`).join("; ");
       const blocked = h.requested && !h.commanded;
@@ -354,6 +360,39 @@ const SOLAR = (() => {
   }
 
   const pct = (f) => (f == null ? "—" : `${Math.round(f * 100)} %`);
+
+  /* "Retry now": COMMISSIONING users end the 10 min probe retry delay (AUTO
+     and MANUAL). Only the waiting is bridged; the controller still checks
+     the heat request, inverter data, start SOC, PV and interlocks. */
+  let retryBusy = false;
+  function canCommand() {
+    return typeof SESSION !== "undefined" && SESSION.user && SESSION.role === "COMMISSIONING" && SESSION.commands;
+  }
+  function renderRetry(e) {
+    const box = q("#energy-actions");
+    box.hidden = !canCommand();
+    if (box.hidden) return;
+    const waiting = ["heater_1kw", "heater_3kw"].filter((k) => ((e && e.modes) || {})[k] &&
+      e.modes[k].state === "RETRY_WAIT");
+    const btn = q("#energy-retry");
+    btn.disabled = retryBusy || !waiting.length;
+    btn.title = waiting.length ? `End the retry delay of the ${waiting.map((k) => MODE_LABEL[k]).join(" + ")} heater now`
+      : "No heater is waiting for a probe retry";
+  }
+  async function retryNow() {
+    const note = q("#energy-retry-note");
+    retryBusy = true; q("#energy-retry").disabled = true;
+    try {
+      const r = await UI.post("/api/command", { action: "energy_retry", args: {} });
+      note.textContent = `${r.accepted ? "Accepted" : "Refused"}: ${r.reason}`;
+      note.className = `small ${r.accepted ? "good-text" : "bad-text"}`;
+    } catch (error) {
+      note.textContent = `Command failed: ${error.message}`;
+      note.className = "small bad-text";
+    }
+    retryBusy = false;
+    poll();
+  }
 
   async function poll() {
     try {
@@ -367,6 +406,7 @@ const SOLAR = (() => {
 
   function init() {
     q("#view-solar").innerHTML = skeleton();
+    q("#energy-retry").onclick = retryNow;
     poll();
     setInterval(poll, POLL_MS);
   }

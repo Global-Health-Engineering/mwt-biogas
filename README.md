@@ -245,19 +245,21 @@ under load is measured:
 | Switch on | until the last written frame has the heater on; deadline `probe_switch_on_timeout_s` (30 s, longer than the 10 s switching pause) |
 | Settle | `probe_settle_s` (10 s) after it was written on |
 | Measure | the next reading of **each** inverter requested after the settle point (`read_at`; a combined value can still hold an older reading of one inverter); deadline `probe_measure_timeout_s` (30 s) |
-| Pass | solar contribution = (PV - other loads) / heater power >= `probe_min_solar_contribution` (0.80) and combined battery discharge <= `probe_max_battery_discharge_w` (853 W, background loads included) -> keeps heating |
+| Pass | solar contribution = (PV - other loads) / heater power >= `probe_min_solar_contribution` (0.70) and combined battery discharge <= `probe_max_battery_discharge_w` (853 W, background loads included) -> keeps heating |
 | Fail / abort | heater off, next probe after `probe_retry_delay_s` (10 min), then only with a heat request and PV: probe failed, a deadline missed, inverter data stale during the probe |
 | Running | contribution too low or discharge too high for `probe_hold_s` (120 s) -> off + retry delay; no inverter data for `communication_timeout_s` (60 s) -> off + retry delay |
 | Any time | SOC <= `soc_stop_at_percent` (50 %) -> off at once, also during a probe (on the first reading that shows it; inverters are read every 5 s); heat request ended or an interlock -> probe ends without retry delay |
+| Retry now | Solar tab button (COMMISSIONING login, AUTO and MANUAL): ends the retry delay of the heater waiting for it; the next probe still needs the start conditions above (request, current data, SOC >= 70 %, PV, no interlock). Logged as `OPERATOR_ACTION ENERGY_FORCE_RETRY` |
 
 - **Other loads** = combined load - rated power of the heaters on in the last
   written frame (no double counting). Limit: a heater cut out by its own
   thermostat is still subtracted.
-- **Discharge limit**: with consistent readings (PV + battery = load), >= 80 %
-  solar contribution already means at most 20 % of the heater power from the
-  battery (600 W for the 3 kW). The 853 W limit therefore bites when the
-  battery also feeds what the load register does not show (self-consumption,
-  unmetered loads).
+- **Discharge limit**: with consistent readings (PV + battery = load), >= 70 %
+  solar contribution means at most 30 % of the heater power from the battery
+  (300 W for the 1 kW, 900 W for the 3 kW). For the 3 kW the 853 W limit is
+  therefore slightly tighter (it needs about 72 %); otherwise it bites when
+  the battery also feeds what the load register does not show
+  (self-consumption, unmetered loads).
 - **Battery sign and summing** (register 190 signed 16 bit, + = discharging;
   sum of both inverters, only when both are current): the balance residual
   PV + battery - load is **diagnostic only**: shown on the Solar tab, in every
@@ -308,8 +310,9 @@ not work). A probe on the combined load is planned with the 4 kW heating.
   start including its solar waits: waiting for the sun never trips the plant.
 - Event log: `ENERGY_PERMISSION` on every change (mode, reason, surplus, SOC).
 - Battery power: positive = discharging (validated with the 1 kW heater
-  test); negative is shown as charging, "sign unverified", until
-  `battery_charge_sign_verified` in `solar_settings.json` is `true`.
+  test), negative = charging (confirmed on site, Nov 2026;
+  `battery_charge_sign_verified: true` in `solar_settings.json`; with
+  `false` the GUI marks charging values "sign unverified").
 - Without pymodbus (or with `solar_settings.json` `enabled: false`) the
   electric heaters get no permission; the controller runs normally.
 - Simulation (`tools/run_simulation.py`, scenarios) uses
@@ -539,6 +542,7 @@ What is running on the RevPi (read-only checks):
     python3 tools/control_scenarios.py 110 111 112 113                # inverter reading, Solar tab data
     python3 tools/control_scenarios.py 114 115 116 117 118 119 120 121 # solar probe (121: fake Modbus inverters)
     python3 tools/control_scenarios.py 124 125 126                    # probe: MANUAL, high discharge, stale data
+    python3 tools/control_scenarios.py 145 146                        # Retry now (bridges the probe retry delay)
     python3 tools/control_scenarios.py 122 123                        # WAITING_FOR_SOLAR, green double blink
     python3 tools/control_scenarios.py 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68   # historian only
     python3 tools/simulate_plant.py         # timeline of a simulated cold start

@@ -123,7 +123,7 @@ class PlantController:
         self.commands = OperatorCommands(
             process=self.process, treatment=self.treatment, faults=self.faults,
             manual=self.manual, inputs=self.inputs, keeper=self.keeper, log=self.log,
-            clock=self.clock, persist=self._persist)
+            clock=self.clock, persist=self._persist, energy=self.energy)
 
         self.cycle_count = 0
         self.last_write_ok = True

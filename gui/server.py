@@ -17,6 +17,8 @@
     POST /api/command {"action", "args"}: logged-in users only; passed to the
                       controller's command server with its token, the user
                       name and the role from the users file
+                      (e.g. "energy_retry": Solar tab "Retry now",
+                      COMMISSIONING only, ends the heater probe's retry delay)
 
 Without a users file nobody can log in and the GUI is read-only. Every POST
 needs the header X-Requested-With: mwt-gui (a page from another site cannot

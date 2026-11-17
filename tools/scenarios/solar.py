@@ -77,12 +77,12 @@ def s110():
     assert solar_module.battery_direction(578) == "DISCHARGING"
     assert solar_module.battery_direction(-578) == "CHARGING"
     assert solar_module.battery_direction(5) == "IDLE"
-    # The shipped settings: both inverters, 5 s poll, charge sign not verified.
+    # The shipped settings: both inverters, 5 s poll, charge sign confirmed (Nov 2026).
     settings = load_settings(ROOT / "config" / "solar_settings.json")
     assert [(i["id"], i["port"], i["device_id"]) for i in settings["inverters"]] == [
         ("inverter_1", 502, 1), ("inverter_2", 502, 1)]
     assert all(i["host"].startswith("192.168.1.") for i in settings["inverters"])
-    assert settings["poll_s"] == 5.0 and settings["battery_charge_sign_verified"] is False
+    assert settings["poll_s"] == 5.0 and settings["battery_charge_sign_verified"] is True
     good = {"inverters": [{"id": "a", "name": "A", "host": "10.0.0.1"}]}
     assert check_settings(good)["inverters"][0]["port"] == 502
     for bad in ({"inverters": []}, {**good, "poll_s": 0}, {**good, "timeout_s": 6},

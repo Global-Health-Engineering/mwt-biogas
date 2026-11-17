@@ -24,7 +24,7 @@
     "probe_settle_s": 10.0,
     "probe_switch_on_timeout_s": 30.0,
     "probe_measure_timeout_s": 30.0,
-    "probe_min_solar_contribution": 0.80,
+    "probe_min_solar_contribution": 0.70,
     "probe_max_battery_discharge_w": 853.0,
     "probe_hold_s": 120.0,
     "probe_retry_delay_s": 600.0,

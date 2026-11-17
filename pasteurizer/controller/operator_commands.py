@@ -12,7 +12,7 @@ OPERATORS = (Role.OPERATOR, Role.COMMISSIONING)
 
 class OperatorCommands:
     def __init__(self, *, process, treatment, faults, manual, inputs, keeper,
-                 log, clock, persist):
+                 log, clock, persist, energy=None):
         self.process = process
         self.treatment = treatment
         self.faults = faults
@@ -22,6 +22,7 @@ class OperatorCommands:
         self.log = log
         self.clock = clock
         self.persist = persist          # callable: save the persistent state now
+        self.energy = energy            # EnergyManager (solar probe of the heaters)
 
     def _logged(self, action, user, result, **details) -> CommandResult:
         self.log.record("OPERATOR_ACTION", action=action,
@@ -139,3 +140,25 @@ class OperatorCommands:
                                               self.clock.monotonic(), renew=renew)
         return self._logged("VALVE_TEST_RENEW" if renew else "VALVE_TEST_OVERRIDE", user, result,
                             pasteurizer_trip_latched=self.faults.summary().pasteurizer_trip)
+
+    # Solar probe ------------------------------------------------------------
+    def energy_retry(self, user) -> CommandResult:
+        """End the 10 min retry delay of the electric-heater solar probe.
+
+        COMMISSIONING only; AUTO and MANUAL (no selector check). Only the
+        waiting is bridged: a new probe still needs a heat request, current
+        inverter data, the start SOC, PV and no interlock."""
+        refused = require(user, Role.COMMISSIONING)
+        if refused:
+            return self._logged("ENERGY_FORCE_RETRY", user, refused)
+        if self.energy is None:
+            return self._logged("ENERGY_FORCE_RETRY", user,
+                                CommandResult(False, "No solar permission in this controller"))
+        bridged = self.energy.force_retry(self.clock.monotonic())
+        if not bridged:
+            return self._logged("ENERGY_FORCE_RETRY", user, CommandResult(
+                False, "No heater is waiting for a probe retry"))
+        names = ", ".join({"heater_1kw": "1 kW", "heater_3kw": "3 kW"}[n] for n in bridged)
+        return self._logged("ENERGY_FORCE_RETRY", user, CommandResult(
+            True, f"Retry delay ended ({names}); a new probe starts if the start "
+                  "conditions are met"), heaters=bridged, mode=getattr(self.inputs.mode, "value", None))

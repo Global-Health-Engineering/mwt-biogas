@@ -27,8 +27,8 @@ inverter, with a flag when the two differ.
 Register map (holding registers, validated with a 1 kW heater test, Nov 2026):
     178 load power W, 183 battery voltage V/100, 184 battery SOC %,
     186 PV1 power W, 187 PV2 power W, 190 battery power W (signed 16 bit).
-Battery power: positive = discharging (validated). Negative is taken to mean
-charging; that sign is not verified yet (battery_charge_sign_verified).
+Battery power: positive = discharging (validated), negative = charging
+(confirmed on site, Nov 2026: battery_charge_sign_verified true).
 """
 
 from datetime import datetime, timezone

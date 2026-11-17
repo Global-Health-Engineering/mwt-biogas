@@ -231,12 +231,14 @@ body.stale .views:has(> #view-solar:not([hidden])) { outline: none; }   /* solar
 /* Solar tab: electrical heating (solar permission) panel */
 .energy-panel { border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px 10px; margin: 4px 0 12px; }
 .energy-note { padding: 0 4px 8px; line-height: 1.4; }
-.energy-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 8px; margin-bottom: 10px; }
-.energy-tile { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }
-.energy-tile .energy-value { font-size: 22px; font-weight: 700; margin: 2px 0; }
+.energy-tiles { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 6px; margin-bottom: 10px; }
+@media (max-width: 900px) { .energy-tiles { grid-auto-flow: row; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); } }
+.energy-tile { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; min-width: 0; overflow-wrap: anywhere; }
+.energy-tile .energy-value { font-size: 19px; font-weight: 700; margin: 2px 0; white-space: nowrap; }
 .energy-tile.good .energy-value { color: var(--on); }
 .energy-tile.bad .energy-value { color: var(--crit); }
 .energy-tile.stale .energy-value { color: var(--muted); }
 .energy-table { margin-bottom: 8px; }
+.energy-actions { display: flex; align-items: center; gap: 10px; margin: 0 0 8px; }
 .good-text { color: var(--on); }
 table.solar-table td.wrap { white-space: normal; }

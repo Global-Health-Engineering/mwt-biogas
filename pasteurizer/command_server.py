@@ -28,7 +28,8 @@ from pasteurizer.operator_interface import CommandResult, Role, User
 from pasteurizer.publisher import LOCALHOST, QuietServer, bind_error_category
 
 ACTIONS = ("manual_request", "manual_release", "manual_clear", "level_override",
-           "cancel_override", "allow_valve_test", "start", "stop", "reset", "acknowledge")
+           "cancel_override", "allow_valve_test", "start", "stop", "reset", "acknowledge",
+           "energy_retry")
 MAX_BODY = 4096
 
 
@@ -66,6 +67,8 @@ def execute(commands, job: _Job) -> CommandResult:
         return commands.stop(user)
     if job.action == "reset":
         return commands.reset(user)
+    if job.action == "energy_retry":
+        return commands.energy_retry(user)
     if job.action == "acknowledge":
         return commands.acknowledge(user, a.get("code"))
     return CommandResult(False, f"Unknown action {job.action!r}")

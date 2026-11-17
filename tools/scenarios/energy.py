@@ -653,3 +653,104 @@ def s121():
         for inv in inverters:
             inv.close()
     assert process.returncode == 0, output
+
+
+@scenario(145, "Retry now: ends only the 10 min retry delay; start conditions (request, SOC, PV, data, interlock) still apply")
+def s145():
+    weak = curtailed(pv_available=1000)                     # under load 1000 W PV: fails
+    # Failed probe, retry delay running: bridged, a new probe starts at once.
+    r = Rig()
+    r.step(30, weak, requests={"heater_3kw"})
+    assert r.mode("heater_3kw").state == RETRY_WAIT and r.mode("heater_3kw").timer_s > 500
+    assert r.em.force_retry(r.t) == ["heater_3kw"]
+    r.step(1, curtailed())
+    assert r.mode("heater_3kw").phase == ARMED and len(r.probe_events("START")) == 2
+    assert "forced_retry_at" in r.mode("heater_3kw").probe["last"]
+    # Nothing waiting: nothing bridged (IDLE, RUNNING and BLOCKED untouched).
+    assert r.em.force_retry(r.t) == []
+    r.step(40, curtailed())
+    assert r.mode("heater_3kw").phase == RUNNING and r.em.force_retry(r.t) == []
+    # Low SOC: the wait ends, but no probe (the battery charges first).
+    r = Rig()
+    r.step(30, weak, requests={"heater_1kw"})
+    assert r.mode("heater_1kw").state == RETRY_WAIT
+    assert r.em.force_retry(r.t) == ["heater_1kw"]
+    r.step(1, {"pv": 3000, "load": 300, "soc": 60})
+    m = r.mode("heater_1kw")
+    assert m.state == BLOCKED and "SOC 60 % < 70 %" in m.reason and not r.on, m
+    assert len(r.probe_events("START")) == 1
+    # No PV (night): no probe either.
+    r = Rig()
+    r.step(30, weak, requests={"heater_3kw"})
+    r.em.force_retry(r.t)
+    r.step(1, {"pv": 0, "load": 300})
+    assert r.mode("heater_3kw").state == BLOCKED and "no probe" in r.mode("heater_3kw").reason
+    # No request / an interlock / stale data: no probe.
+    for kwargs, data in (({"requests": set()}, curtailed()), ({}, None)):
+        r = Rig()
+        r.step(30, weak, requests={"heater_3kw"})
+        r.em.force_retry(r.t)
+        r.step(1, data, **kwargs)
+        assert r.mode("heater_3kw").state == BLOCKED and len(r.probe_events("START")) == 1
+    r = Rig()
+    r.step(30, weak, requests={"heater_3kw"})
+    r.interlocks = {"heater_3kw": "MANHOLE: test"}
+    r.em.force_retry(r.t)
+    r.step(1, curtailed())
+    assert "interlock" in r.mode("heater_3kw").reason and len(r.probe_events("START")) == 1
+    # Fails again after a forced retry: a normal 10 min delay again.
+    r = Rig()
+    r.step(30, weak, requests={"heater_3kw"})
+    r.em.force_retry(r.t)
+    r.step(30, weak)
+    assert r.mode("heater_3kw").state == RETRY_WAIT and r.mode("heater_3kw").timer_s > 560
+
+
+@scenario(146, "Retry now via the command channel: COMMISSIONING only, AUTO and MANUAL, logged; OPERATOR refused")
+def s146():
+    from pasteurizer.command_server import _Job, execute
+    from scenarios.harness import OPERATOR
+
+    # AUTO: failed probe in WAITING_FOR_SOLAR, bridged, the next probe starts.
+    sim = _waiting_night()
+    sim.run(25)
+    sim.solar.pv_w = 1000.0                                 # weak: the probe fails
+    assert sim.run(60, until=lambda s: s.status.energy["status"]["modes"]["heater_3kw"]["state"]
+                   == "RETRY_WAIT")
+    assert sim.status.state == "WAITING_FOR_SOLAR"
+    refused = execute(sim.ctl.commands, _Job(OPERATOR, "energy_retry", {}))
+    assert not refused.accepted, refused
+    starts = len([e for e in sim.events("ENERGY_PROBE") if e["data"]["event"] == "START"])
+    sim.solar.pv_w = 4000.0
+    done = execute(sim.ctl.commands, _Job(COMMISSIONING, "energy_retry", {}))
+    assert done.accepted and "3 kW" in done.reason, done
+    sim.run(0.6)
+    assert len([e for e in sim.events("ENERGY_PROBE") if e["data"]["event"] == "START"]) == starts + 1
+    assert sim.status.state == "PREHEAT_3KW", sim.status.state
+    logged = [e["data"] for e in sim.events("OPERATOR_ACTION") if e["data"]["action"] == "ENERGY_FORCE_RETRY"]
+    assert [x["accepted"] for x in logged] == [False, True], logged
+    assert logged[1]["user"] == "comm" and logged[1]["heaters"] == ["heater_3kw"]
+    assert logged[1]["mode"] == "AUTO", logged[1]
+    # Nothing waiting now: refused with the reason.
+    again = sim.ctl.commands.energy_retry(COMMISSIONING)
+    assert not again.accepted and "No heater is waiting" in again.reason
+
+    # MANUAL: 1 kW ON request, weak sun -> retry wait, bridged -> probe again.
+    sim = Sim(params=FAST, bath=25.0, arbiter=SIM_ENERGY)
+    sim.solar.charge_accept_w = 0.0
+    sim.plant.mode = Mode.MANUAL
+    sim.solar.pv_w = 600.0
+    sim.run(2)
+
+    def hold(seconds):
+        for _ in range(int(seconds / 2)):
+            sim.ctl.commands.manual_request(COMMISSIONING, "heater_1kw", True, renew=True)
+            sim.run(2)
+    assert sim.ctl.commands.manual_request(COMMISSIONING, "heater_1kw", True).accepted
+    hold(40)
+    assert sim.status.energy["status"]["modes"]["heater_1kw"]["state"] == "RETRY_WAIT"
+    sim.solar.pv_w = 4000.0
+    assert sim.ctl.commands.energy_retry(COMMISSIONING).accepted
+    hold(40)
+    assert sim.status.energy["status"]["modes"]["heater_1kw"]["phase"] == "RUNNING"
+    assert sim.out("heater_1kw")

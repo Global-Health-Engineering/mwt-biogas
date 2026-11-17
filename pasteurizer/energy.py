@@ -25,7 +25,7 @@ and the solar power that then comes in is measured:
                time (a combined value may still hold an older reading of one
                inverter); deadline probe_measure_timeout_s. Then:
                solar contribution = (PV - other loads) / heater power
-                   >= probe_min_solar_contribution (0.80), and
+                   >= probe_min_solar_contribution (0.70), and
                combined battery discharge (both inverters, + = discharging,
                background loads included) <= probe_max_battery_discharge_w
                (853 W)  -> RUNNING, otherwise -> RETRY.
@@ -35,6 +35,9 @@ and the solar power that then comes in is measured:
     RETRY      not permitted for probe_retry_delay_s (10 min) after a failed or
                aborted probe (fail, data stale during the probe, a deadline
                missed); then IDLE again (still needs a request and PV).
+               A COMMISSIONING user can end the delay early ("Retry now" on
+               the Solar tab, force_retry): the heater goes to IDLE on the next
+               evaluation and all start conditions above still apply.
 
     In every permitted phase: SOC <= soc_stop_at_percent (50 %) -> off at
     once (IDLE, a new start needs the start SOC again); heat request ended or
@@ -54,8 +57,8 @@ test, Nov 2026); the combined value is the sum of both inverters and exists
 only when both are current. Diagnostic only (logged, never decides):
 residual = PV + battery - load; outside max(battery_balance_tolerance_w,
 battery_balance_tolerance_fraction x load) it is flagged - an inverted sign
-would show as about twice the load. Confirm sign and summing on site with
-real charging and discharging readings.
+would show as about twice the load. Sign confirmed on site for charging and
+discharging (Nov 2026).
 """
 
 from dataclasses import asdict, dataclass, field
@@ -314,6 +317,21 @@ class EnergyManager:
             balance_residual_w=None if residual is None else round(residual),
             balance_ok=balance_ok)
         return self.status, events
+
+    def force_retry(self, now) -> list:
+        """End the retry delay of every heater in RETRY (operator command).
+
+        Only the waiting is bridged: the heater goes to IDLE on the next
+        update() and a new probe still needs a heat request, current data,
+        the start SOC, PV and no interlock. Returns the heaters bridged."""
+        bridged = []
+        for name in HEATERS:
+            p = self.probes[name]
+            if p.phase == RETRY and p.retry_until is not None and now < p.retry_until:
+                p.retry_until = now
+                p.last = {**p.last, "forced_retry_at": now}
+                bridged.append(name)
+        return bridged
 
     def _permitted(self, key) -> bool:
         if not self.s.solar_permission_enabled:
