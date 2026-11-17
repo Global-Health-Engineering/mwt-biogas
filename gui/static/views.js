@@ -186,11 +186,15 @@ const VIEWS = (() => {
   function pasteurizer() {
     const HXL = 400, HXR = 455;          // GPST-HX-01 left and right ports
     const BX = 1090, PU = 1000;          // burner pipe, circulation pump
+    // Effluent feed pump GPST-PU-02: like GPST-PU-01, suction on the left at
+    // the pump's centre line (lower), discharge at the top right (line to HX-01).
+    const FP = 200, FPY = 313;
     const Y4 = 1100, Y3 = 1170, LINE = 660, DRAIN = 720, BR = 1000, END = 1236;
     return `<svg viewBox="0 0 ${W} ${H_VIEW}" class="process" role="img" aria-label="Pasteurizer process view">
       ${arrow(22, 98, 80, "EDB", "#7a4a1a")}
       ${pipe([[126, 98], [137, 98]], C.filterEff)}
-      ${pipe([[137, 160], [88, 160], [88, 305], [HXL, 305]], C.filterEff)}
+      ${pipe([[137, 160], [88, 160], [88, FPY + 2], [FP - 16, FPY + 2]], C.filterEff)}
+      ${pipe([[FP + 16, FPY - 8], [HXL, FPY - 8]], C.filterEff)}
       ${pipe([[VX, 307], [HXR, 307]], C.past)}
       ${pipe([[HXR, 395], [497, 395], [497, 469], [VX, 469]], C.filterEff)}
       ${pipe([[HXL, 395], [310, 395], [310, LINE], [END, LINE]], C.past)}
@@ -207,15 +211,15 @@ const VIEWS = (() => {
         "PST-TK-01 · 1000 L sludge buffer tank")}
       ${levelSwitch("level_switch_9", 374, 84, "LSH", "PST-LS-02", "Buffer tank high", 310, "right")}
       ${levelSwitch("level_switch_8", 374, 158, "LSL", "PST-LS-01", "Buffer tank low", 310, "right")}
-      ${flowMeter("flow_sensor_3", 106, 410, "PST-FI-01", "Pasteurizer feed flow", { y: 305 }, "right")}
-      ${pump("effluent_feed_pump", 168, 305, "GPST-PU-02", "Effluent feed pump")}
+      ${flowMeter("flow_sensor_3", 106, 410, "PST-FI-01", "Pasteurizer feed flow", { y: FPY + 2 }, "right")}
+      ${pump("effluent_feed_pump", FP, FPY, "GPST-PU-02", "Effluent feed pump")}
       ${group("hx_GPST-HX-01", `<rect class="sym" x="400" y="290" width="55" height="115"/>` +
         pipe([[HXL, 305], [HXR, 395]], C.filterEff, "thin") + pipe([[HXR, 307], [HXL, 395]], C.past, "thin") +
         label(428, 424, "GPST-HX-01") + label(428, 440, "Heat recovery", "name"), "GPST-HX-01 · Heat recovery exchanger")}
       ${vessel()}
       ${heater("heater_3kw", 350, 105, "GPST-EH-01", "3 kW startup heater")}
       ${heater("heater_1kw", 428, 75, "GPST-EH-02", "1 kW assist heater")}
-      ${temp("PT1_B2", 352, 262, "PT1", "Cold effluent into GPST-HX-01", 352, 305, true)}
+      ${temp("PT1_B2", 352, 262, "PT1", "Cold effluent into GPST-HX-01", 352, 305, false)}
       ${temp("PT4_B5", 352, 470, "PT4", "Cooled treated effluent", 352, 395, false)}
       ${temp("PT3_B4", 660, 250, "PT3", "Hot effluent leaving PST-HX-02", 660, 307, true)}
       ${temp("PT2_B3", 660, 540, "PT2", "Warm effluent into PST-HX-02", 660, 469, true)}
