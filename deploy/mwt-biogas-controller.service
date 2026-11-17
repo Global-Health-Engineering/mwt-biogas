@@ -1,6 +1,6 @@
 # mwt-biogas plant controller: live inputs, outputs enabled.
 #
-# Install (adjust User and the paths if the repository is not /home/pi/mwt-biogas):
+# Install (adjust User and the paths if the repository is not /home/pi/codes/mwt-biogas):
 #   sudo cp deploy/mwt-biogas-controller.service /etc/systemd/system/
 #   sudo systemctl daemon-reload
 #   sudo systemctl start mwt-biogas-controller
@@ -31,10 +31,10 @@ StartLimitBurst=3
 Type=notify
 NotifyAccess=main
 User=pi
-WorkingDirectory=/home/pi/mwt-biogas
+WorkingDirectory=/home/pi/codes/mwt-biogas
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/usr/bin/python3 tools/run_controller.py
-ExecStopPost=/usr/bin/python3 tools/safe_outputs.py --state logs/controller_state.json
+ExecStart=/home/pi/codes/mwt-biogas/.venv/bin/python3 tools/run_controller.py
+ExecStopPost=/home/pi/codes/mwt-biogas/.venv/bin/python3 tools/safe_outputs.py --state logs/controller_state.json
 KillSignal=SIGINT
 TimeoutStartSec=30
 TimeoutStopSec=20

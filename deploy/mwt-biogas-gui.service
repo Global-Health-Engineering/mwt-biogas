@@ -13,9 +13,9 @@ After=mwt-biogas-controller.service
 [Service]
 Type=simple
 User=pi
-WorkingDirectory=/home/pi/mwt-biogas
+WorkingDirectory=/home/pi/codes/mwt-biogas
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/usr/bin/python3 tools/run_gui.py --database logs/controller.sqlite
+ExecStart=/home/pi/codes/mwt-biogas/.venv/bin/python3 tools/run_gui.py --database logs/controller.sqlite
 Restart=on-failure
 RestartSec=5
 
