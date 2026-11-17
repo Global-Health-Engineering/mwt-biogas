@@ -32,6 +32,7 @@ class TreatmentRun:
     good_flow_since: float | None = None
     pt3_low: Persistence = field(default_factory=Persistence)
     return_check: Persistence = field(default_factory=Persistence)
+    at_minimum: Persistence = field(default_factory=Persistence)   # Y4 at minimum, PT3/flow still asks lower
     grace_passed: bool = False
 
 
@@ -39,8 +40,9 @@ class TreatmentLogic:
     def __init__(self, config, log):
         self.cs = config.control
         self.log = log
-        self.step_controller = FallbackStepController(self.cs.fallback)
-        self.flow_pi = (FlowPIController(self.cs.flow_pi)
+        floor = self.cs.feed_pump.min_y4_opening_percent
+        self.step_controller = FallbackStepController(self.cs.fallback, floor=floor)
+        self.flow_pi = (FlowPIController(self.cs.flow_pi, valve_min=floor)
                         if self.cs.flow_pi.assigned else None)
         self.run: TreatmentRun | None = None
         self.y4_command = 0.0
@@ -48,6 +50,7 @@ class TreatmentLogic:
         self.retry_pending = False
         self.retry_wait_until: float | None = None
         self.high_flow_pending = False
+        self.min_opening_pending = False    # last run stopped at the Y4 minimum
         self._interruptions = deque()
 
     # ------------------------------------------------------------------
@@ -56,11 +59,13 @@ class TreatmentLogic:
 
     def begin(self, state, now, *, handover=False):
         self.high_flow_pending = False
+        self.min_opening_pending = False
         if handover:
             self.run.return_check.reset()
             controller = (self.flow_pi if state == P.MODEL_TREATMENT else None) \
                 or self.step_controller
             controller.start(now, self.y4_command)
+            self.run.at_minimum.reset()
             return
         self.run = TreatmentRun(started_at=now)
         self.y4_command = self.cs.fallback.start_opening_percent
@@ -94,7 +99,7 @@ class TreatmentLogic:
         waiting = P.FALLBACK_QUALIFY if state == P.FALLBACK_TREATMENT else P.HEAT_UP
 
         for check in (self._supply, self._availability, self._sensor_faults,
-                      self._under_temperature, self._low_flow):
+                      self._feed_pump, self._under_temperature, self._low_flow):
             transition = check(state, inputs, flags, waiting)
             if transition is not None:
                 return transition
@@ -133,6 +138,23 @@ class TreatmentLogic:
         if not flags.treatment_fault:
             return None
         return Transition(waiting, "Treatment sensor or Y4 feedback invalid",
+                          interruption=True)
+
+    def _feed_pump(self, state, inputs, flags, waiting):
+        if not flags.feed_pump_cut_off:
+            return None
+        return Transition(waiting, "Feed pump ran against closed valves; switched off",
+                          interruption=True)
+
+    def _at_minimum(self, controller, inputs, waiting, why):
+        """Y4 held at its minimum while the controller still closes: stop."""
+        held = self.run.at_minimum.update(controller.wants_lower, inputs.now)
+        if held < self.cs.feed_pump.min_opening_hold_s:
+            return None
+        self.min_opening_pending = True
+        minimum = self.cs.feed_pump.min_y4_opening_percent
+        return Transition(waiting, f"Y4 at its minimum opening ({minimum:g} %) for "
+                          f"{self.cs.feed_pump.min_opening_hold_s:g} s; {why}",
                           interruption=True)
 
     def _under_temperature(self, state, inputs, flags, waiting):
@@ -189,6 +211,8 @@ class TreatmentLogic:
         if run.released_at is not None:
             self.y4_command = self.step_controller.update(inputs.pt3, inputs.flow3,
                                                           inputs.now)
+            return self._at_minimum(self.step_controller, inputs, P.FALLBACK_QUALIFY,
+                                    "PT3 still below target")
         return None
 
     def _model(self, inputs, flags):
@@ -207,4 +231,6 @@ class TreatmentLogic:
         if self.run.released_at is not None and self.flow_pi is not None:
             self.y4_command = self.flow_pi.update(result.achievable_flow_l_min,
                                                   inputs.flow3, inputs.now)
+            return self._at_minimum(self.flow_pi, inputs, P.HEAT_UP,
+                                    "flow still above the model's request")
         return None

@@ -207,7 +207,8 @@ const VIEWS = (() => {
         "PST-TK-01 · 1000 L sludge buffer tank")}
       ${levelSwitch("level_switch_9", 374, 84, "LSH", "PST-LS-02", "Buffer tank high", 310, "right")}
       ${levelSwitch("level_switch_8", 374, 158, "LSL", "PST-LS-01", "Buffer tank low", 310, "right")}
-      ${flowMeter("flow_sensor_3", 180, 348, "PST-FI-01", "Pasteurizer feed flow", { y: 305 }, "right")}
+      ${flowMeter("flow_sensor_3", 106, 410, "PST-FI-01", "Pasteurizer feed flow", { y: 305 }, "right")}
+      ${pump("effluent_feed_pump", 168, 305, "GPST-PU-02", "Effluent feed pump")}
       ${group("hx_GPST-HX-01", `<rect class="sym" x="400" y="290" width="55" height="115"/>` +
         pipe([[HXL, 305], [HXR, 395]], C.filterEff, "thin") + pipe([[HXR, 307], [HXL, 395]], C.past, "thin") +
         label(428, 424, "GPST-HX-01") + label(428, 440, "Heat recovery", "name"), "GPST-HX-01 · Heat recovery exchanger")}

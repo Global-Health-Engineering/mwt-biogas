@@ -51,10 +51,10 @@ class CommandResult:
     reason: str
 
 
-# Outputs a commissioning user may request in MANUAL (not compressor or fan).
+# Outputs a commissioning user may request in MANUAL (not the cabinet fan).
 MANUAL_COMMANDS = tuple(
     name for name in PERMISSIONED_COMMANDS
-    if name not in ("biogas_compressor", "cabinet_fan_disabled")
+    if name not in ("cabinet_fan_disabled",)
 )
 
 # Level roles whose real "reached" protects equipment (cannot be hidden).

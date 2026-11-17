@@ -608,7 +608,10 @@ def s121():
     pv = {186: 600, 187: 600, 178: 150, 183: 5200, 184: 85, 190: 0}  # per inverter: 1.2 kW PV
     inverters = [FakeInverter(pv), FakeInverter(pv)]
     folder = Path(tempfile.mkdtemp())
-    config_copy(folder, {f"energy.{k}": v for k, v in PROBE.items()},
+    # The fake load register does not include the heater: the 3 kW load check
+    # (scenarios 155-160) is off here, this checks the Modbus path.
+    config_copy(folder, {**{f"energy.{k}": v for k, v in PROBE.items()},
+                         "energy.probe_load_check_heaters": []},
                 {"poll_s": 1.0, "timeout_s": 0.5, "stale_after_s": 3.0,
                  "inverters": [{"id": f"inverter_{n + 1}", "name": f"Inverter {n + 1}",
                                 "host": "127.0.0.1", "port": inv.port, "device_id": 1}

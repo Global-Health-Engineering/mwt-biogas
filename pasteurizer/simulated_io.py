@@ -24,10 +24,13 @@ class PlantParameters:
     bath_loss_w_k: float = 20.0
     biogas_power_w: float = 8000.0                # while circulation runs
     burner_thermostat_c: float = 86.0             # water heater's own limit
+    # 3 kW heater's own thermostat (on the element; measured here on the bath):
+    # opens at this, closes again 5 K below. Site setting: 66 °C (maximum).
+    heater_3kw_thermostat_c: float = 66.0
     effluent_cold_c: float = 25.0                 # PT1
     effluent_inlet_c: float = 45.0                # PT2 after heat exchanger
     coil_constant_l_min: float = 1.5              # PT3 = bath-(bath-PT2)*exp(-k/flow)
-    y4_full_flow_l_min: float = 6.0               # gravity flow at Y4 100 %
+    y4_full_flow_l_min: float = 6.0               # feed pump flow at Y4 100 %
     y4_speed_percent_s: float = 100.0 / 30.0
     transfer_pump_l_min: float = 5.0
     overflow_valve_l_s: float = 2.0
@@ -52,6 +55,7 @@ class Faults:
     counter_jump: set = field(default_factory=set)    # one backwards jump each
     counter_unstable: set = field(default_factory=set)  # discontinuity every step
     y4_stuck: bool = False
+    heater_3kw_dead: bool = False                     # output on, draws nothing
     y4_feedback_invalid: bool = False
     forced_switches: dict = field(default_factory=dict)
 
@@ -76,6 +80,7 @@ class SimulatedPlant:
         self._drain_run_s = 0.0
         self.bath_c = 40.0
         self.y4_position = 0.0
+        self.heater_3kw_thermostat_open = False
         self.counters = {name: 0.0 for name in config.io_mapping["flow_counters"]}
         self.transfer_flow_scale = {1: 1.0, 2: 1.0}
         self._last = clock.monotonic()
@@ -87,9 +92,19 @@ class SimulatedPlant:
     @property
     def treatment_flow_l_min(self):
         o = self.outputs
-        if not o.pasteurizer_isolation_open or self.effluent_l <= 0:
+        # Effluent feed pump GPST-PU-02 pushes it through Y3 and Y4.
+        if (not o.effluent_feed_pump or not o.pasteurizer_isolation_open
+                or self.effluent_l <= 0):
             return 0.0
         return self.p.y4_full_flow_l_min * self.y4_position / 100.0
+
+    def heater_draws(self, name) -> bool:
+        """The heater takes power: output on, powered, not faulty, thermostat closed."""
+        if not self.powered or not getattr(self.outputs, name, False):
+            return False
+        if name == "heater_3kw":
+            return not (self.faults.heater_3kw_dead or self.heater_3kw_thermostat_open)
+        return True
 
     def pt3_c(self):
         flow = self.treatment_flow_l_min
@@ -137,7 +152,12 @@ class SimulatedPlant:
 
         # Bath energy balance.
         burner = o.heating_circulation and self.bath_c < p.burner_thermostat_c
-        power = (3000.0 * o.heater_3kw + 1000.0 * o.heater_1kw
+        if self.bath_c >= p.heater_3kw_thermostat_c:
+            self.heater_3kw_thermostat_open = True
+        elif self.bath_c <= p.heater_3kw_thermostat_c - 5.0:
+            self.heater_3kw_thermostat_open = False
+        power = (3000.0 * self.heater_draws("heater_3kw")
+                 + 1000.0 * self.heater_draws("heater_1kw")
                  + p.biogas_power_w * burner)
         power -= p.bath_loss_w_k * (self.bath_c - p.ambient_c)
         if treatment > 0:

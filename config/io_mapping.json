@@ -50,7 +50,7 @@
     "led_yellow_P2": "O_3",
     "led_red_P3": "O_4",
     "led_green_P1": "O_5",
-    "compressor_M3_3_K3_3": "O_6",
+    "pump_effluent_feed_GPST_PU_02": "O_6",
     "pump_40w_1_M3_1_K3_1": "O_7",
     "pump_40w_2_M3_2_K3_2": "O_8",
     "pump_120w_1_M2_1_K6_1": "O_9",
@@ -87,6 +87,7 @@
     },
     "notes": [
       "Heater relay assignments tested; heater operation not tested.",
+      "O_6 (relay K3.3, formerly the biogas compressor M3.3) now drives the effluent feed pump GPST-PU-02; pump wiring and run direction not yet verified.",
       "Valve identities must be confirmed before automatic operation.",
       "Level switch assignments follow the wiring list; individual verification pending.",
       "Temperature assignments follow the wiring list; sensor locations must be verified."

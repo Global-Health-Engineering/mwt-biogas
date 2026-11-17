@@ -42,6 +42,8 @@ from pasteurizer.energy import (
 PROBE_PHASES = (ARMED, SETTLING, MEASURING)
 from pasteurizer.event_log import EventLog
 from pasteurizer.fault_manager import FaultManager
+from pasteurizer.feed_pump import FeedPumpGuard
+from pasteurizer.heater_load import Heater3kWLoadMonitor
 from pasteurizer.model_interface import ModelResult, ModelSupervisor
 from pasteurizer.modes import Mode
 from pasteurizer.operator_interface import ManualControl
@@ -104,13 +106,15 @@ class PlantController:
                                  manual=self.manual, model=self.model, log=self.log,
                                  start_time=now)
         self.y4 = Y4Monitor(config.valve)
-        self.evaluator = FaultEvaluator(config, self.faults, self.y4)
+        self.feed_pump = FeedPumpGuard(control)
+        self.evaluator = FaultEvaluator(config, self.faults, self.y4, self.feed_pump)
         self.treatment = TreatmentLogic(config, self.log)
         self.process = ProcessStateMachine(config, self.treatment, self.faults, self.log,
                                            start_time=now)
-        self.requests = OutputRequestBuilder(config)
+        self.requests = OutputRequestBuilder(config, feed_pump=self.feed_pump)
         self.arbiter = OutputArbiter(config, start_time=now)
         self.energy = EnergyManager(config.arbiter.energy, start_time=now)
+        self.heater_load = Heater3kWLoadMonitor(control)
         # Last cycle's requested frame and arbitration notes: the heat requests
         # and interlocks the solar probe sees (energy.update runs before them).
         self._last_requested = None
@@ -246,9 +250,12 @@ class PlantController:
             requests=self._heat_requests(), interlocks=self._heater_interlocks())
         for kind, data in energy_events:
             self.log.record(kind, **data)
+        thermostat = self.heater_load.update(energy_events, inputs, self.faults, self.log)
         self.process.step(inputs, flags, self.arbiter.last_written,
                           solar_3kw=(energy.permitted(["heater_3kw"]),
-                                     self._solar_3kw_reason(energy)))
+                                     self._solar_3kw_reason(energy)),
+                          heater_3kw_thermostat=thermostat,
+                          heater_3kw_blocked=self.heater_load.blocked(self.faults))
         flags = self.evaluator.flags(inputs)     # the step may latch a fault
 
         requests = self.requests.build(
@@ -264,7 +271,8 @@ class PlantController:
             fallback_path=self.process.path == TreatmentPath.FALLBACK)
         result = self.arbiter.arbitrate(
             requests.commands, requests.permissions, indicators, now,
-            energy=energy, plant_safe=flags.summary.plant_trip)
+            energy=energy, plant_safe=flags.summary.plant_trip,
+            feed_pump_sequence=inputs.mode == Mode.AUTO)
 
         self._last_requested = requests.commands
         self._last_notes = result.notes
@@ -373,6 +381,9 @@ class PlantController:
                 "probe_hold_s": e.probe_hold_s, "probe_retry_delay_s": e.probe_retry_delay_s,
                 "battery_balance_tolerance_w": e.battery_balance_tolerance_w,
                 "battery_balance_tolerance_fraction": e.battery_balance_tolerance_fraction,
+                "probe_min_load_rise_fraction": e.probe_min_load_rise_fraction,
+                "probe_load_loss_s": e.probe_load_loss_s,
+                "probe_load_check_heaters": list(e.probe_load_check_heaters),
                 "preheat_max_heating_s": self.cfg.control.preheat.max_duration_s,
                 "preheat_heating_s": round(self.process.preheat_heated_s, 1)
                 if self.process.state.value in ("PREHEAT_3KW", "WAITING_FOR_SOLAR")

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pasteurizer.controller.conditions import fallback_prerequisites, heating_permitted
 from pasteurizer.controller.y4_monitor import Y4Monitor
 from pasteurizer.fault_manager import FaultManager, FaultSummary
+from pasteurizer.feed_pump import FeedPumpGuard
 from pasteurizer.heating import BiogasHeatMonitor
 from pasteurizer.model_interface import ModelStatus
 from pasteurizer.modes import Mode
@@ -43,6 +44,7 @@ class FaultFlags:
     treatment_fault: bool     # anything that forbids release now
     heating_ok: bool          # heating permission (spec section 6)
     fallback_ready: bool      # fallback prerequisites hold
+    feed_pump_cut_off: bool = False   # feed pump ran against closed valves (until re-requested)
 
 
 class _SensorWatch:
@@ -66,11 +68,13 @@ class _SensorWatch:
 
 
 class FaultEvaluator:
-    def __init__(self, config, faults: FaultManager, y4: Y4Monitor):
+    def __init__(self, config, faults: FaultManager, y4: Y4Monitor,
+                 feed_pump: FeedPumpGuard | None = None):
         self.cfg = config
         self.cs = config.control
         self.faults = faults
         self.y4 = y4
+        self.feed_pump = feed_pump if feed_pump is not None else FeedPumpGuard(self.cs)
         self.transfer = {line: TransferFlowSupervisor(self.cs.transfer_flow)
                          for line in LINES}
         self._pt3 = _SensorWatch()
@@ -92,6 +96,7 @@ class FaultEvaluator:
         self._model(inputs, process)
         self._overflow(inputs)
         self._transfer(inputs, transfer_requested, last_written)
+        self._feed_pump(inputs, last_written)
         return self.flags(inputs)
 
     def flags(self, inputs) -> FaultFlags:
@@ -109,6 +114,7 @@ class FaultEvaluator:
             heating_ok=heating_permitted(self.cs, inputs, heating_fault=heating_fault,
                                          trip=summary.trip),
             fallback_ready=fallback_prerequisites(self.cs, inputs),
+            feed_pump_cut_off=self.feed_pump.cut_off,
         )
 
     # ------------------------------------------------------------------
@@ -204,6 +210,7 @@ class FaultEvaluator:
         # Raised by the state machine when the retry fails (latched).
         f.set("LOW_TREATMENT_FLOW_RETRY_FAILED", False)
         f.set("FALLBACK_FLOW_HIGH", treatment.high_flow_pending)
+        f.set("Y4_AT_MINIMUM_OPENING", treatment.min_opening_pending)
         f.set("REPEATED_INTERRUPTIONS",
               treatment.interruption_count(inputs.now) >= stop.interruption_count)
 
@@ -221,6 +228,12 @@ class FaultEvaluator:
         for line in LINES:
             switch = self.cfg.level_roles[f"line_{line}_tank_overflow"]
             self.faults.set(f"OVERFLOW_{line}", inputs.level(switch))
+
+    def _feed_pump(self, inputs, last_written):
+        """Closed-valve protection; unknown inputs keep the timer (no clearing)."""
+        if inputs.acquisition_ok:
+            self.feed_pump.update(inputs, last_written)
+        self.faults.set("FEED_PUMP_CLOSED_VALVES", self.feed_pump.cut_off)
 
     def _transfer(self, inputs, requested, last_written):
         for line in LINES:

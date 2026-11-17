@@ -12,18 +12,21 @@ from scenarios.harness import (
 )
 
 
-@scenario(5, "Release: green blinks during Y3 opening, steady once Y4 open")
+@scenario(5, "Release: Y3, then feed pump, then Y4; green blinks until Y4 open, then steady")
 def s5():
     sim = Sim(params=FAST, bath=84.0)
     assert sim.run(200, until=state_is("FALLBACK_TREATMENT"))
     sim.run(0.4)
     assert sim.out("pasteurizer_isolation_open") and sim.out("control_valve_percent") == 0.0
+    assert not sim.out("effluent_feed_pump"), "feed pump waits for Y3's travel time"
     greens = set()
     for _ in range(10):
         sim.run(0.2)
         greens.add(sim.out("light_green"))
     assert greens == {True, False}, "green must blink while Y4 is commanded closed"
-    sim.run(9)
+    sim.run(9)      # Y3 open 10 s: pump on, Y4 still closed
+    assert sim.out("effluent_feed_pump") and sim.out("control_valve_percent") == 0.0
+    sim.run(2.2)    # pump on 2 s: Y4 opens
     assert sim.out("control_valve_percent") == 10.0
     sim.run(0.6)
     greens, reds = set(), set()

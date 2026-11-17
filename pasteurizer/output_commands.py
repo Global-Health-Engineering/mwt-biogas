@@ -19,7 +19,7 @@ class OutputCommands:
     pasteurizer_isolation_open: bool = False
     control_valve_percent: float = 0.0
 
-    biogas_compressor: bool = False
+    effluent_feed_pump: bool = False
 
     # False allows the cabinet fan's local thermostat to operate.
     cabinet_fan_disabled: bool = False
@@ -61,7 +61,7 @@ SWITCHED_COMMANDS = (
     "overflow_valve_1_open",
     "overflow_valve_2_open",
     "pasteurizer_isolation_open",
-    "biogas_compressor",
+    "effluent_feed_pump",
     "cabinet_fan_disabled",
 )
 
@@ -93,7 +93,7 @@ class OutputPermissions:
     pasteurizer_isolation_open: bool = False
     control_valve_percent: bool = False
 
-    biogas_compressor: bool = False
+    effluent_feed_pump: bool = False
     cabinet_fan_disabled: bool = False
 
     reasons: tuple[tuple[str, str], ...] = ()

@@ -118,11 +118,9 @@ assert rules(result, "control_valve_percent") == ["ISOLATION_NOT_OPEN"]
 print("4. Y4 opens 10 s after Y3 is written open, and closes with Y3.")
 
 # 5. Fixed overrides ---------------------------------------------------------
-result = run(arbiter, OutputCommands(biogas_compressor=True,
-                                     cabinet_fan_disabled=True))
-assert not result.commands.biogas_compressor
+result = run(arbiter, OutputCommands(cabinet_fan_disabled=True))
 assert not result.commands.cabinet_fan_disabled
-print("5. Compressor kept off; fan stays under thermostat control.")
+print("5. Fan stays under thermostat control.")
 
 # 6. Indicators -----------------------------------------------------------
 requested_lights = OutputCommands(light_red=True, light_green=True)

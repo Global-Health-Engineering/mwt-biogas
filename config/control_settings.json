@@ -6,7 +6,9 @@
     "y4_closed_tolerance_percent": 3.0
   },
   "preheat": {
-    "max_duration_s": 18000.0
+    "max_duration_s": 18000.0,
+    "heater_3kw_thermostat_min_pt5_c": 40.0,
+    "heater_3kw_no_load_fault_count": 3
   },
   "preheat_circulation": {
     "trigger_delta_c": 5.0,
@@ -51,6 +53,11 @@
     "max_opening_percent": 100.0,
     "max_flow_l_min": 1.0,
     "max_flow_validated_for_hardware": false
+  },
+  "feed_pump": {
+    "closed_valve_max_s": 10.0,
+    "min_y4_opening_percent": 5.0,
+    "min_opening_hold_s": 60.0
   },
   "treatment_stop": {
     "pt3_min_c": 65.0,

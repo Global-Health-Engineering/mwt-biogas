@@ -60,6 +60,12 @@ CATALOGUE: dict[str, AlarmInfo] = {
     "PT4_INVALID": AlarmInfo(("PT4_B5",), "Warning only; treatment continues"),
     "OVERTEMPERATURE": AlarmInfo(("PT5_B6", "PT6_B7"), PASTEURIZER_TRIP),
     "PREHEAT_TIMEOUT": AlarmInfo(("heater_3kw", "PT5_B6"), "3 kW off; " + PASTEURIZER_TRIP),
+    "HEATER_3KW_NO_LOAD": AlarmInfo(
+        ("heater_3kw", "PT5_B6"),
+        "Warning; 3 kW off for the probe retry delay, then tested again"),
+    "HEATER_3KW_NO_LOAD_REPEATED": AlarmInfo(
+        ("heater_3kw",),
+        "3 kW blocked until reset; AUTO continues without preheat (biogas / 1 kW)"),
     "BIOGAS_HEAT_NOT_DETECTED": AlarmInfo(
         ("heating_circulation", "PT5_B6", "PT6_B7"),
         "Warning only; circulation, 1 kW heating and treatment continue"),
@@ -74,6 +80,12 @@ CATALOGUE: dict[str, AlarmInfo] = {
         ("flow_sensor_3", "control_valve_percent"), PASTEURIZER_TRIP),
     "FALLBACK_FLOW_HIGH": AlarmInfo(
         ("flow_sensor_3", "control_valve_percent"), "Y3/Y4 closed; fallback requalifies"),
+    "FEED_PUMP_CLOSED_VALVES": AlarmInfo(
+        ("effluent_feed_pump", "pasteurizer_isolation_open", "control_valve_percent"),
+        "Feed pump off; AUTO: treatment interrupted, normal retry; MANUAL: request withdrawn"),
+    "Y4_AT_MINIMUM_OPENING": AlarmInfo(
+        ("control_valve_percent", "effluent_feed_pump", "PT3_B4"),
+        "Treatment stopped (Y4/Y3 closed, then feed pump off); heat-up and retry"),
     "REPEATED_INTERRUPTIONS": AlarmInfo((), "Warning only; treatment continues"),
     "MODEL_UNRELIABLE_NO_FALLBACK": AlarmInfo((), PASTEURIZER_TRIP),
     # Model

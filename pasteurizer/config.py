@@ -125,6 +125,14 @@ class EnergySettings:
     # max(tolerance_w, tolerance_fraction x load) flags the battery reading.
     battery_balance_tolerance_w: float
     battery_balance_tolerance_fraction: float
+    # Load check (heaters in probe_load_check_heaters): at the probe the
+    # measured load must rise by >= fraction x rated power against the last
+    # reading before switch-on, else NO_LOAD (heater draws nothing: thermostat
+    # or fault, not a solar verdict). Running: a drop by that much for
+    # probe_load_loss_s -> LOAD_LOST.
+    probe_min_load_rise_fraction: float = 0.70
+    probe_load_loss_s: float = 20.0
+    probe_load_check_heaters: tuple[str, ...] = ("heater_3kw",)
 
 
 @dataclass(frozen=True)
@@ -135,7 +143,11 @@ class ArbiterSettings:
     switching_pause_seconds: float
     energy: EnergySettings
     isolation_open_before_control_valve_seconds: float
-    compressor_enabled: bool
+    # Effluent feed pump GPST-PU-02 in AUTO: Y3 open -> pump -> Y4; on a normal
+    # stop the pump runs on briefly after Y3/Y4 are written closed.
+    feed_pump_start_after_isolation_open_seconds: float
+    feed_pump_control_valve_after_pump_seconds: float
+    feed_pump_run_on_after_valves_closed_seconds: float
     cabinet_fan_disable_allowed: bool
     heat_up_blink_period_seconds: float
     # WAITING_FOR_SOLAR: green pulse / gap length and the pause after two pulses.
@@ -415,7 +427,15 @@ ENERGY_HEATERS = ("heater_1kw", "heater_3kw")
 PROBE_KEYS = ("probe_min_pv_w", "probe_settle_s", "probe_switch_on_timeout_s",
               "probe_measure_timeout_s", "probe_min_solar_contribution",
               "probe_max_battery_discharge_w", "probe_hold_s", "probe_retry_delay_s",
-              "battery_balance_tolerance_w", "battery_balance_tolerance_fraction")
+              "battery_balance_tolerance_w", "battery_balance_tolerance_fraction",
+              "probe_min_load_rise_fraction", "probe_load_loss_s",
+              "probe_load_check_heaters")
+
+
+def _load_check_heaters(value, where) -> tuple[str, ...]:
+    if not isinstance(value, list) or any(name not in ENERGY_HEATERS for name in value):
+        raise ConfigError(f"{where}: expected a list of {list(ENERGY_HEATERS)}")
+    return tuple(dict.fromkeys(value))
 
 
 def _energy(data, where) -> EnergySettings:
@@ -466,6 +486,13 @@ def _energy(data, where) -> EnergySettings:
         battery_balance_tolerance_fraction=_number(
             data["battery_balance_tolerance_fraction"],
             f"{where}.battery_balance_tolerance_fraction", minimum=0.0, maximum=10.0),
+        probe_min_load_rise_fraction=_number(
+            data["probe_min_load_rise_fraction"],
+            f"{where}.probe_min_load_rise_fraction", strictly_positive=True, maximum=2.0),
+        probe_load_loss_s=_number(data["probe_load_loss_s"], f"{where}.probe_load_loss_s",
+                                  minimum=0.0, maximum=3600.0),
+        probe_load_check_heaters=_load_check_heaters(
+            data["probe_load_check_heaters"], f"{where}.probe_load_check_heaters"),
     )
     if settings.soc_stop_at_percent >= settings.soc_start_min_percent:
         raise ConfigError(f"{where}: soc_stop_at_percent must be below "
@@ -483,7 +510,7 @@ def _solar(data, where) -> dict:
 
 def _arbiter(data, where):
     _exact_keys(data, ("settings_validated", "preheat_exclusion", "energy",
-                       "isolation_valve", "compressor_enabled",
+                       "isolation_valve", "feed_pump",
                        "cabinet_fan_disable_allowed", "indicators"), where)
     preheat = _exact_keys(data["preheat_exclusion"],
                           ("heater", "excluded_outputs", "switching_pause_seconds"),
@@ -492,6 +519,11 @@ def _arbiter(data, where):
     isolation = _exact_keys(data["isolation_valve"],
                             ("open_before_control_valve_seconds",),
                             f"{where}.isolation_valve")
+    feed_pump = _exact_keys(data["feed_pump"],
+                            ("start_after_isolation_open_seconds",
+                             "control_valve_after_pump_seconds",
+                             "run_on_after_valves_closed_seconds"),
+                            f"{where}.feed_pump")
     indicators = _exact_keys(data["indicators"],
                              ("heat_up_blink_period_seconds",
                               "solar_wait_pulse_seconds", "solar_wait_pause_seconds"),
@@ -528,8 +560,11 @@ def _arbiter(data, where):
             isolation["open_before_control_valve_seconds"],
             f"{where}.isolation_valve.open_before_control_valve_seconds",
             minimum=0.0, maximum=600.0),
-        compressor_enabled=_boolean(data["compressor_enabled"],
-                                    f"{where}.compressor_enabled"),
+        **{f"feed_pump_{key}": _number(feed_pump[key], f"{where}.feed_pump.{key}",
+                                       minimum=0.0, maximum=600.0)
+           for key in ("start_after_isolation_open_seconds",
+                       "control_valve_after_pump_seconds",
+                       "run_on_after_valves_closed_seconds")},
         cabinet_fan_disable_allowed=_boolean(
             data["cabinet_fan_disable_allowed"],
             f"{where}.cabinet_fan_disable_allowed"),

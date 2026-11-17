@@ -51,6 +51,8 @@ class ProcessStateMachine:
         self.preheat_heated_s = 0.0
         self._preheat_tick: float | None = None
         self._solar_3kw = (True, "")
+        self._thermostat = None
+        self._3kw_blocked = False
         # Heating-water circulation as written (preheat pulses, biogas diagnostic).
         self.circulation = OutputTimer()
         self.dwell = Persistence()
@@ -105,10 +107,17 @@ class ProcessStateMachine:
                 self.preheat_heated_s += max(0.0, now - self._preheat_tick)
         self._preheat_tick = now
 
-    def step(self, inputs, flags, last_written, *, solar_3kw=(True, "")):
+    def step(self, inputs, flags, last_written, *, solar_3kw=(True, ""),
+             heater_3kw_thermostat=None, heater_3kw_blocked=False):
         """solar_3kw: (permitted, reason) of the solar permission for the 3 kW
-        heater in this cycle (energy.py; always permitted when the rule is off)."""
+        heater in this cycle (energy.py; always permitted when the rule is off).
+        heater_3kw_thermostat: ThermostatReached when the 3 kW drew no power
+        with PT5 above the thermostat limit this cycle (heater_load.py): the
+        preheat ends. heater_3kw_blocked: 3 kW blocked until reset (no power
+        repeatedly): no preheat, biogas / 1 kW instead."""
         self._solar_3kw = solar_3kw
+        self._thermostat = heater_3kw_thermostat
+        self._3kw_blocked = heater_3kw_blocked
         now = inputs.now
         self._count_preheat(now, last_written)
         self.circulation.update(
@@ -142,6 +151,10 @@ class ProcessStateMachine:
         if not start_permitted(self.cfg, inputs, flags, stop_hold=self.stop_hold):
             return
         if inputs.pt5 < self.cfg.startup.cold_start_below_celsius:
+            if self._3kw_blocked:
+                self._to(P.HEAT_UP, "Cold start with the 3 kW blocked (check heater "
+                         "electronics): no preheat, biogas / 1 kW heating", inputs.now)
+                return
             permitted, reason = self._solar_3kw
             if permitted:
                 self._to(P.PREHEAT_3KW, "Cold start", inputs.now)
@@ -180,6 +193,14 @@ class ProcessStateMachine:
     def _preheat(self, inputs):
         """Also completes a preheat interrupted by WAITING_FOR_SOLAR: the same
         refreshed-PT5 qualification applies in both states."""
+        if self._thermostat is not None:
+            self._to(P.HEAT_UP, f"{self._thermostat.reason}; preheat ends, "
+                     "continuing with biogas / 1 kW", inputs.now)
+            return
+        if self._3kw_blocked:
+            self._to(P.HEAT_UP, "3 kW blocked (no power repeatedly, check heater "
+                     "electronics): preheat ends, continuing with biogas / 1 kW", inputs.now)
+            return
         complete = self.cfg.startup.preheat_complete_at_celsius
         if (inputs.pt5 is not None and inputs.pt5 >= complete
                 and self.pt5_refreshed(inputs.now)):

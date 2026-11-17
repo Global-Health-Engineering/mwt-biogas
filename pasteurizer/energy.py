@@ -29,9 +29,18 @@ and the solar power that then comes in is measured:
                combined battery discharge (both inverters, + = discharging,
                background loads included) <= probe_max_battery_discharge_w
                (853 W)  -> RUNNING, otherwise -> RETRY.
+               Load check first (heaters in probe_load_check_heaters, the
+               3 kW): the load must have risen by probe_min_load_rise_fraction
+               (0.70) x rated power against the last reading before the
+               heater was written on; otherwise NO_LOAD -> RETRY. A heater
+               that draws nothing (own thermostat open, or a fault) is not a
+               solar verdict; the controller decides which (controller
+               heater_load.py).
     RUNNING    permitted. Contribution too low or discharge too high for
                probe_hold_s (120 s) -> RETRY. Inverter data missing for
-               communication_timeout_s -> RETRY.
+               communication_timeout_s -> RETRY. Load-checked heater: the load
+               drops by the same amount against the reading before for
+               probe_load_loss_s (20 s) -> LOAD_LOST -> RETRY.
     RETRY      not permitted for probe_retry_delay_s (10 min) after a failed or
                aborted probe (fail, data stale during the probe, a deadline
                missed); then IDLE again (still needs a request and PV).
@@ -226,6 +235,9 @@ class _Probe:
         self.measure_from = None
         self.retry_until = None
         self.bad_since = None
+        self.load_before = None         # last load reading before switch-on (W)
+        self.load_ref = None            # running: load while drawing (W)
+        self.load_low_since = None
         self.last = {}                  # last result for the display and log
 
     @property
@@ -333,6 +345,26 @@ class EnergyManager:
                 bridged.append(name)
         return bridged
 
+    def _load_lost(self, p, m, now, min_rise) -> bool:
+        """Running: the load fell by min_rise against the reading while drawing.
+
+        The reference follows small changes of the load (other loads drift);
+        a larger drop holds it, because the two inverters are read at
+        different times and a heater switching off can show up in two steps.
+        A drop of about the heater's power must persist for
+        probe_load_loss_s. Returns True once it has."""
+        if p.load_ref is None:
+            p.load_ref = m.load_w
+        drop = p.load_ref - m.load_w
+        if drop >= min_rise:
+            if p.load_low_since is None:
+                p.load_low_since = now
+            return now - p.load_low_since >= self.s.probe_load_loss_s
+        p.load_low_since = None
+        if drop < 0.3 * min_rise:
+            p.load_ref = m.load_w
+        return False
+
     def _permitted(self, key) -> bool:
         if not self.s.solar_permission_enabled:
             return True
@@ -368,12 +400,16 @@ class EnergyManager:
                                             "phase": p.phase, "reason": reason,
                                             **values(), **extra}))
 
-        def end(phase, reason, result):
+        load_checked = heater in s.probe_load_check_heaters
+        min_rise = s.probe_min_load_rise_fraction * power
+
+        def end(phase, reason, result, **extra):
             """Probe or running permission ends: heater off."""
-            log(result, reason)
-            p.last = {"result": result, "reason": reason, "at": now, **values()}
+            log(result, reason, **extra)
+            p.last = {"result": result, "reason": reason, "at": now, **values(), **extra}
             p.phase = phase
             p.granted_at = p.on_at = p.measure_from = p.bad_since = None
+            p.load_before = p.load_ref = p.load_low_since = None
             if phase == RETRY:
                 p.retry_until = now + s.probe_retry_delay_s
 
@@ -412,6 +448,8 @@ class EnergyManager:
         if p.phase in (ARMED, SETTLING, MEASURING) and not m.valid:
             end(RETRY, f"Inverter data not current during the probe: {m.reason}", "STALE")
         if p.phase == ARMED:
+            if not is_on and m.valid:
+                p.load_before = m.load_w        # reading taken before switch-on
             if is_on:
                 p.phase, p.on_at = SETTLING, now
                 p.measure_from = now + s.probe_settle_s
@@ -440,6 +478,14 @@ class EnergyManager:
                 else:
                     return status(PROBING, f"Probe: waiting for a fresh reading from "
                                   f"{', '.join(late)}; deadline in", deadline - now)
+            elif (load_checked and p.load_before is not None
+                  and m.load_w - p.load_before < min_rise):
+                rise = m.load_w - p.load_before
+                end(RETRY, f"No electrical load registered when testing: load rose "
+                           f"{rise:.0f} W (needs {min_rise:.0f} W); the {name} heater "
+                           "draws no power (thermostat or fault), not judged on solar",
+                    "NO_LOAD", load_before_w=round(p.load_before),
+                    load_rise_w=round(rise))
             else:
                 low = contribution < need_contribution
                 high = discharge > max_discharge
@@ -452,6 +498,7 @@ class EnergyManager:
                 else:
                     p.phase = RUNNING
                     p.bad_since = None
+                    p.load_ref, p.load_low_since = m.load_w, None
                     p.last = {"result": "PASS", "reason": f"Probe passed: {verdict}",
                               "at": now, **values()}
                     log("PASS", f"Probe passed: {verdict}")
@@ -468,7 +515,18 @@ class EnergyManager:
                                   s.communication_timeout_s - waited)
             elif not is_on:
                 p.bad_since = None          # nothing to judge while it is off
+                p.load_ref = p.load_low_since = None
                 return status(PERMITTED, f"Probe passed; {name} not on at the moment")
+            elif load_checked and self._load_lost(p, m, now, min_rise):
+                drop = p.load_ref - m.load_w
+                end(RETRY, f"Load dropped by {drop:.0f} W for {s.probe_load_loss_s:g} s "
+                           f"while the {name} heater was on: it stopped drawing power "
+                           "(thermostat or fault)", "LOAD_LOST",
+                    load_before_w=round(p.load_ref), load_drop_w=round(drop))
+            elif load_checked and p.load_low_since is not None:
+                return status(STOPPING, f"Load dropped by {p.load_ref - m.load_w:.0f} W "
+                              f"with the {name} heater on; checking",
+                              s.probe_load_loss_s - (now - p.load_low_since))
             else:
                 low = contribution < need_contribution
                 high = discharge > max_discharge
@@ -521,6 +579,7 @@ class EnergyManager:
             return status(BLOCKED, text,
                           blockers=[x for x in problems if x != "No heat request"])
         p.phase, p.granted_at = ARMED, now
+        p.load_before = m.load_w            # heater not yet written on
         log("START", f"Probe started: PV {m.pv_w:.0f} W, SOC {m.soc_percent:.0f} %")
         return status(PROBING, f"Probe: waiting for the {name} output to switch on; "
                       "deadline in", s.probe_switch_on_timeout_s)

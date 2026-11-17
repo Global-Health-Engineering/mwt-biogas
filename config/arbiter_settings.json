@@ -7,7 +7,7 @@
       "transfer_pump_2",
       "heater_1kw",
       "manhole_drain",
-      "biogas_compressor"
+      "effluent_feed_pump"
     ],
     "switching_pause_seconds": 10.0
   },
@@ -24,17 +24,26 @@
     "probe_settle_s": 10.0,
     "probe_switch_on_timeout_s": 30.0,
     "probe_measure_timeout_s": 30.0,
-    "probe_min_solar_contribution": 0.70,
+    "probe_min_solar_contribution": 0.7,
     "probe_max_battery_discharge_w": 853.0,
     "probe_hold_s": 120.0,
     "probe_retry_delay_s": 600.0,
     "battery_balance_tolerance_w": 300.0,
-    "battery_balance_tolerance_fraction": 0.25
+    "battery_balance_tolerance_fraction": 0.25,
+    "probe_min_load_rise_fraction": 0.7,
+    "probe_load_loss_s": 20.0,
+    "probe_load_check_heaters": [
+      "heater_3kw"
+    ]
   },
   "isolation_valve": {
     "open_before_control_valve_seconds": 10.0
   },
-  "compressor_enabled": false,
+  "feed_pump": {
+    "start_after_isolation_open_seconds": 10.0,
+    "control_valve_after_pump_seconds": 2.0,
+    "run_on_after_valves_closed_seconds": 2.0
+  },
   "cabinet_fan_disable_allowed": false,
   "indicators": {
     "heat_up_blink_period_seconds": 1.0,

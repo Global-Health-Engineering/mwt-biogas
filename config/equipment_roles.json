@@ -11,7 +11,7 @@
     "overflow_valve_2_open": "ball_valve_2_Y2",
     "pasteurizer_isolation_open": "ball_valve_3_Y3",
     "control_valve_percent": "control_valve_Y4",
-    "biogas_compressor": "compressor_M3_3_K3_3",
+    "effluent_feed_pump": "pump_effluent_feed_GPST_PU_02",
     "cabinet_fan_disabled": "fan_M1_K4",
     "light_green": "led_green_P1",
     "light_yellow": "led_yellow_P2",
@@ -120,10 +120,14 @@
       "purpose": "Assist process heating when biogas heat is insufficient"
     }
   },
-  "biogas_compressor": {
-    "output": "compressor_M3_3_K3_3",
-    "purpose": "Assist biogas supply pressure if required by the burner",
-    "operating_strategy": null
+  "effluent_feed_pump": {
+    "output": "pump_effluent_feed_GPST_PU_02",
+    "tag": "GPST-PU-02",
+    "purpose": "Feed effluent from the buffer tank PST-TK-01 through the pasteurizer during treatment",
+    "dry_run_protection": "effluent_tank_low",
+    "sequence": "Start: Y3 open, after its travel time pump on, then Y4 opens. Stop: Y4 and Y3 close, pump off after the run-on time. Trips: pump off at once",
+    "closed_valve_protection": "Pump off when it runs longer than feed_pump.closed_valve_max_s against a closed Y3 or Y4 (AUTO and MANUAL)",
+    "running_feedback": false
   },
   "cabinet_fan": {
     "output": "fan_M1_K4",

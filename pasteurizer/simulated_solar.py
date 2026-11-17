@@ -48,6 +48,9 @@ class SimulatedSolar:
         outputs = getattr(self.plant, "outputs", None)
         if outputs is None or not getattr(self.plant, "powered", True):
             return 0.0
+        draws = getattr(self.plant, "heater_draws", None)
+        if draws is not None:       # SimulatedPlant: thermostat and heater faults
+            return sum(w for name, w in POWER_W.items() if draws(name))
         return sum(w for name, w in POWER_W.items() if getattr(outputs, name, False))
 
     def produced_pv_w(self, load):

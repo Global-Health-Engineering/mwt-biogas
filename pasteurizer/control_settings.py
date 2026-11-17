@@ -36,6 +36,13 @@ class StartSettings:
 @dataclass(frozen=True)
 class PreheatSettings:
     max_duration_s: float = num(positive=True, maximum=86400.0)
+    # 3 kW heater drew no power (probe NO_LOAD / running LOAD_LOST): with a
+    # valid PT5 at or above this its own thermostat is taken as reached
+    # (preheat ends, HEAT_UP with biogas / 1 kW); below it the heater counts
+    # as faulty: warning, and after no_load_fault_count times in a row the
+    # 3 kW is blocked until reset ("check heater electronics").
+    heater_3kw_thermostat_min_pt5_c: float = num(0.0, 100.0)
+    heater_3kw_no_load_fault_count: int = num(1, 100, integer=True)
 
 
 @dataclass(frozen=True)
@@ -115,6 +122,22 @@ class FallbackSettings:
     max_opening_percent: float = num(0.0, 100.0)
     max_flow_l_min: float | None = num(positive=True, maximum=100.0, optional=True)
     max_flow_validated_for_hardware: bool = flag()
+
+
+@dataclass(frozen=True)
+class FeedPumpSettings:
+    """Effluent feed pump GPST-PU-02 (no running feedback).
+
+    closed_valve_max_s: longest time the pump may run (as written) against a
+    closed Y3 or Y4 (Y4 feedback at or below start.y4_closed_tolerance_percent
+    or invalid), in AUTO and MANUAL; then it is switched off.
+    min_y4_opening_percent: while treating, the Y4 controllers never command
+    less. When Y4 holds at this minimum and the controller still wants to
+    close further for min_opening_hold_s, treatment stops (normal sequence).
+    """
+    closed_valve_max_s: float = num(positive=True, maximum=60.0)
+    min_y4_opening_percent: float = num(0.0, 100.0)
+    min_opening_hold_s: float = num(positive=True, maximum=3600.0)
 
 
 @dataclass(frozen=True)
@@ -208,6 +231,7 @@ class ControlSettings:
     model: ModelSettings = field(default=MISSING)
     flow_pi: FlowPISettings = field(default=MISSING)
     fallback: FallbackSettings = field(default=MISSING)
+    feed_pump: FeedPumpSettings = field(default=MISSING)
     treatment_stop: TreatmentStopSettings = field(default=MISSING)
     heater_1kw: Heater1kWSettings = field(default=MISSING)
     faults: FaultSettings = field(default=MISSING)
@@ -226,6 +250,7 @@ GROUPS = {
     "model": ModelSettings,
     "flow_pi": FlowPISettings,
     "fallback": FallbackSettings,
+    "feed_pump": FeedPumpSettings,
     "treatment_stop": TreatmentStopSettings,
     "heater_1kw": Heater1kWSettings,
     "faults": FaultSettings,
@@ -322,6 +347,23 @@ def _cross_check(s: ControlSettings, where):
     if not fb.min_opening_percent <= fb.start_opening_percent <= fb.max_opening_percent:
         raise ControlSettingsError(
             f"{where}.fallback: start opening must lie within the opening limits"
+        )
+    fp = s.feed_pump
+    if fp.min_y4_opening_percent <= s.start.y4_closed_tolerance_percent:
+        raise ControlSettingsError(
+            f"{where}.feed_pump: min_y4_opening_percent must be above "
+            "start.y4_closed_tolerance_percent (else the closed-valve protection "
+            "stops the pump in normal operation)"
+        )
+    if not fp.min_y4_opening_percent <= fb.start_opening_percent:
+        raise ControlSettingsError(
+            f"{where}.feed_pump: min_y4_opening_percent must not exceed "
+            "fallback.start_opening_percent"
+        )
+    if fp.min_y4_opening_percent > fb.max_opening_percent:
+        raise ControlSettingsError(
+            f"{where}.feed_pump: min_y4_opening_percent must not exceed "
+            "fallback.max_opening_percent"
         )
     t = s.transfer_flow
     if t.no_flow_max_l_min >= t.low_flow_below_l_min:

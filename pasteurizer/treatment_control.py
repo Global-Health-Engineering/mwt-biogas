@@ -4,6 +4,11 @@ Both controllers share one interface (start, update, command), so the
 fallback step controller can later be replaced by a PT3 PI, and control can
 be handed between model and fallback without a jump: the incoming
 controller starts from Y4's current accepted command.
+
+With the effluent feed pump, Y4 never goes below a minimum opening while
+treating (feed_pump.min_y4_opening_percent). `wants_lower` reports that the
+controller sits at that minimum and would close further this update; the
+treatment logic stops treatment when that persists.
 """
 
 from pasteurizer.numbers import is_finite_number
@@ -12,15 +17,17 @@ from pasteurizer.numbers import is_finite_number
 class FallbackStepController:
     """PT3 step controller with a hold band and a measured-flow limit."""
 
-    def __init__(self, settings):
+    def __init__(self, settings, floor: float = 0.0):
         self.s = settings
+        self.min_opening = max(settings.min_opening_percent, floor)
         self.command = 0.0
+        self.wants_lower = False
         self._last_step = None
 
     def start(self, now: float, opening: float | None = None):
         start = self.s.start_opening_percent if opening is None else opening
-        self.command = min(max(start, self.s.min_opening_percent),
-                           self.s.max_opening_percent)
+        self.command = min(max(start, self.min_opening), self.s.max_opening_percent)
+        self.wants_lower = False
         self._last_step = now
 
     def update(self, pt3_c, flow_l_min, now: float) -> float:
@@ -32,15 +39,16 @@ class FallbackStepController:
         self._last_step = now
         if not is_finite_number(pt3_c):
             return self.command
-        if pt3_c < s.pt3_target_c - s.hold_band_c:
+        too_cold = pt3_c < s.pt3_target_c - s.hold_band_c
+        self.wants_lower = too_cold and self.command <= self.min_opening
+        if too_cold:
             self.command -= s.step_percent
         elif pt3_c > s.pt3_target_c + s.hold_band_c:
             at_limit = (s.max_flow_l_min is not None and is_finite_number(flow_l_min)
                         and flow_l_min >= s.max_flow_l_min)
             if not at_limit:
                 self.command += s.step_percent
-        self.command = min(max(self.command, s.min_opening_percent),
-                           s.max_opening_percent)
+        self.command = min(max(self.command, self.min_opening), s.max_opening_percent)
         return self.command
 
 
@@ -54,6 +62,7 @@ class FlowPIController:
         self.valve_min = valve_min
         self.valve_max = valve_max
         self.command = 0.0
+        self.wants_lower = False
         self._integral = 0.0
         self._setpoint = None
         self._last = None
@@ -61,6 +70,7 @@ class FlowPIController:
     def start(self, now: float, opening: float):
         self.command = min(max(opening, self.valve_min), self.valve_max)
         self._integral = self.command   # bumpless: output equals current command
+        self.wants_lower = False
         self._setpoint = None
         self._last = now
 
@@ -87,6 +97,7 @@ class FlowPIController:
             self._integral = candidate
         raw = s.kp_percent_per_l_min * error + self._integral
 
+        self.wants_lower = raw < self.valve_min and self.command <= self.valve_min
         slew = s.slew_percent_per_s * dt
         raw = self.command + max(-slew, min(slew, raw - self.command))
         self.command = min(max(raw, self.valve_min), self.valve_max)

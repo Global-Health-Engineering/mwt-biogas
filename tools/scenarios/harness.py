@@ -239,7 +239,7 @@ def state_is(*states):
 
 def to_fallback_treatment(sim, timeout=1200):
     assert sim.run(timeout, until=state_is("FALLBACK_TREATMENT")), sim.status.state_reason
-    sim.run(12)   # Y3 opening delay, Y4 released
+    sim.run(14)   # Y3 travel 10 s, feed pump on, Y4 released 2 s later
 
 
 SCENARIOS = {}

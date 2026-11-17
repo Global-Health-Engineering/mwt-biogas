@@ -6,9 +6,11 @@ Importing the topic modules registers their scenarios in SCENARIOS.
 from scenarios import (  # noqa: F401  (imported for registration)
     equipment,
     faults,
+    feed_pump,
     gui,
     gui_data,
     heating_circulation,
+    heater_load,
     historian,
     manual,
     operator,

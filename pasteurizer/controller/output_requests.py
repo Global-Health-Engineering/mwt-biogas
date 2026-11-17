@@ -9,6 +9,14 @@ continuously in the second stage; starting the pump also calls for burner
 ignition on this installation. Permissions only allow
 requests; the arbiter decides the frame.
 
+The effluent feed pump GPST-PU-02 runs in AUTO in the treatment states (the
+arbiter orders Y3 -> pump -> Y4 and gives it the run-on after Y3/Y4 close)
+and on a manual request in MANUAL. Its permission is held outside treatment
+too, so the run-on works on a normal stop; it is withdrawn for Level 3
+faults, invalid acquisition or selector, the buffer tank low switch (dry run)
+and the closed-valve cutoff (pasteurizer/feed_pump.py), which switch it off
+at once.
+
 Every command also gets an explanation (reason and blocking protections) for
 the event log; explanations never change what is requested.
 """
@@ -16,6 +24,7 @@ the event log; explanations never change what is requested.
 from dataclasses import dataclass
 
 from pasteurizer.alarms import AlarmScope
+from pasteurizer.feed_pump import FEED_PUMP, FeedPumpGuard
 from pasteurizer.heating import AssistHeater, PreheatCirculation
 from pasteurizer.manhole_drain import ManholeDrainController
 from pasteurizer.modes import Mode
@@ -87,9 +96,10 @@ class _Frame:
 
 
 class OutputRequestBuilder:
-    def __init__(self, config):
+    def __init__(self, config, feed_pump: FeedPumpGuard | None = None):
         self.cfg = config
         self.cs = config.control
+        self.feed_pump = feed_pump if feed_pump is not None else FeedPumpGuard(self.cs)
         self.transfer = TransferPumpController(config)
         self.drain = ManholeDrainController(config)
         self.overflow = {line: OverflowValve(self.cs.overflow) for line in LINES}
@@ -121,6 +131,16 @@ class OutputRequestBuilder:
                        "Selector or acquisition invalid: process equipment off")
                 for name in HEATING_COMMANDS + VALVE_COMMANDS:
                     frame.explain(name, why)
+        self._feed_pump(frame, inputs, flags, process, manual, manual_requests)
+        if faults.listed("HEATER_3KW_NO_LOAD_REPEATED"):
+            frame.permitted.discard("heater_3kw")
+            frame.reasons["heater_3kw"] = ("3 kW drew no power repeatedly: check heater "
+                                           "electronics, then reset")
+            entry = frame.explanations.get("heater_3kw") or {"reason": "Not requested",
+                                                            "blocked_by": []}
+            frame.explanations["heater_3kw"] = {
+                **entry, "blocked_by": [*entry["blocked_by"], "HEATER_3KW_NO_LOAD_REPEATED"],
+                "not_permitted": frame.reasons["heater_3kw"]}
         return frame.result(release)
 
     # Independent equipment -------------------------------------------------
@@ -222,8 +242,7 @@ class OutputRequestBuilder:
                 frame.explain(name, f"{why}: no treatment")
             return False
 
-        treatment_ok = (inputs.supply is True and inputs.acquisition_ok
-                        and not flags.treatment_fault and not flags.summary.trip)
+        treatment_ok = _treatment_ok(inputs, flags)
         blocked = [code for code, on in (
             ("NO_SUPPLY", inputs.supply is not True),
             ("SAMPLING_UNAVAILABLE", not inputs.acquisition_ok),
@@ -237,6 +256,48 @@ class OutputRequestBuilder:
                       blocked_by=blocked)
         written = arbiter.last_written
         return treatment_ok and written is not None and written.control_valve_percent > 0
+
+    # Effluent feed pump GPST-PU-02 -----------------------------------------
+    def _feed_pump(self, frame, inputs, flags, process, manual, manual_requests):
+        guard = self.feed_pump
+        if inputs.mode == Mode.AUTO:
+            # The cutoff only withdraws the permission: the request must fall
+            # (treatment interrupted) and rise again to re-arm the pump.
+            requested = process.state in TREATMENT_STATES and _treatment_ok(inputs, flags)
+            why = (f"Plant state {process.state.value}: treatment feed (Y3 -> pump -> Y4)"
+                   if requested else f"Plant state {process.state.value}: no treatment")
+        elif inputs.mode == Mode.MANUAL:
+            requested = bool(manual_requests.get(FEED_PUMP, False))
+            why = _manual_reason(manual, FEED_PUMP)
+        else:
+            requested = False
+            why = (f"Selector {inputs.mode.value}: feed pump off" if inputs.mode is not None
+                   else "Selector or acquisition invalid: feed pump off")
+        guard.request_edge(requested)
+        if guard.cut_off and inputs.mode == Mode.MANUAL and requested:
+            holder = manual.requests[FEED_PUMP].user
+            manual.release(FEED_PUMP)
+            frame.events.append(("MANUAL_RELEASE_AUTOMATIC", {
+                "command": FEED_PUMP, "user": holder,
+                "cause": "Feed pump ran against closed valves and was switched off; "
+                         "press the request again"}))
+            requested = False
+            guard.request_edge(False)
+        blocked = [code for code, on in (
+            ("SAMPLING_UNAVAILABLE", not inputs.acquisition_ok),
+            ("SELECTOR_INVALID", inputs.mode is None),
+            ("BUFFER_TANK_LOW", inputs.supply is not True),
+            ("TRIP", flags.summary.trip),
+            ("FEED_PUMP_CLOSED_VALVES", guard.cut_off)) if on]
+        reason = None
+        if blocked:
+            reason = {"BUFFER_TANK_LOW": "Buffer tank low (PST-LS-01): dry-run protection",
+                      "FEED_PUMP_CLOSED_VALVES": guard.last.reason,
+                      "TRIP": "Level 3 fault",
+                      "SELECTOR_INVALID": "Selector invalid",
+                      "SAMPLING_UNAVAILABLE": "Acquisition unavailable"}[blocked[-1]]
+        frame.request(FEED_PUMP, requested, not blocked, reason, why=why,
+                      blocked_by=blocked)
 
     def _assist(self, inputs, flags, process, second_stage) -> bool:
         h = self.cs.heater_1kw
@@ -280,6 +341,11 @@ class OutputRequestBuilder:
         frame.request("control_valve_percent",
                       float(manual_requests.get("control_valve_percent", 0.0)),
                       valves_ok, reason, why=_manual_reason(manual, "control_valve_percent"))
+
+
+def _treatment_ok(inputs, flags) -> bool:
+    return (inputs.supply is True and inputs.acquisition_ok
+            and not flags.treatment_fault and not flags.summary.trip)
 
 
 def _manual_reason(manual, name) -> str:

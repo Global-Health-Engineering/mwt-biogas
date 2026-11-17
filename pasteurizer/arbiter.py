@@ -2,14 +2,18 @@
 
 Rules, applied in this order every cycle (settings in arbiter_settings.json):
 
-1. Fixed overrides: the biogas compressor stays off while compressor_enabled
-   is false; the cabinet fan cannot be disabled unless
+1. Fixed overrides: the cabinet fan cannot be disabled unless
    cabinet_fan_disable_allowed is true (False = local thermostat in control).
 2. Permissions: a request without permission is removed. Permissions only
    allow requests; they never create one.
+   Feed pump run-on (normal stop): when the effluent feed pump GPST-PU-02 is
+   no longer requested but still permitted, was written on, and Y3/Y4 close
+   in this frame, the pump stays on until Y3/Y4 have been written closed for
+   feed_pump.run_on_after_valves_closed_seconds. Without permission (trips,
+   dry run, closed-valve cutoff) it goes off in the same frame as the valves.
 3. Preheat exclusion: while the 3 kW heater is requested, every output in
    preheat_exclusion.excluded_outputs is removed (transfer pumps, 1 kW
-   heater, manhole drain, compressor). The heating-water circulation is not
+   heater, manhole drain, effluent feed pump). The heating-water circulation is not
    excluded: it pulses together with the 3 kW in PREHEAT_3KW. Overflow
    valves Y1/Y2 are not affected.
 4. Energy (solar): the electric heaters (1 kW, 3 kW, both) run only with
@@ -28,6 +32,12 @@ Rules, applied in this order every cycle (settings in arbiter_settings.json):
 6. Isolation before control valve: Y4 opens (> 0 %) only if Y3 is requested
    open and has been written open for open_before_control_valve_seconds.
    When Y3 is not requested open, Y4 is closed in the same frame.
+   Feed pump sequence (AUTO, feed_pump_sequence=True): the pump starts only
+   when Y3 is requested open and has been written open for
+   feed_pump.start_after_isolation_open_seconds; Y4 opens only while the pump
+   is requested and has been written on for
+   feed_pump.control_valve_after_pump_seconds. In MANUAL the order is not
+   forced (Y3/Y4 and the pump can be tested separately).
 7. Indicators are generated here, never passed through (spec section 11):
    green steady only with treatment release (permission held and Y4
    commanded open), blinking in heat-up, qualification and during the Y3
@@ -66,7 +76,7 @@ ENERGY_HEATERS = ("heater_1kw", "heater_3kw")
 def clock_text(seconds) -> str:
     seconds = max(0, int(math.ceil(seconds)))
     return f"{seconds // 60}:{seconds % 60:02d}" if seconds >= 60 else f"{seconds} s"
-COMPRESSOR_COMMAND = "biogas_compressor"
+FEED_PUMP_COMMAND = "effluent_feed_pump"
 FAN_COMMAND = "cabinet_fan_disabled"
 
 
@@ -124,6 +134,15 @@ def _off(value):
     return False if isinstance(value, bool) else 0.0
 
 
+def _valves_closed_frame(out: dict) -> bool:
+    return not out[ISOLATION_COMMAND] and not _active(out[CONTROL_VALVE_COMMAND])
+
+
+def _valves_closed(commands: OutputCommands) -> bool:
+    return (not commands.pasteurizer_isolation_open
+            and not _active(commands.control_valve_percent))
+
+
 class OutputArbiter:
     def __init__(self, config: PlantConfig | None = None, *, start_time: float):
         if not math.isfinite(start_time):
@@ -135,6 +154,8 @@ class OutputArbiter:
         # on at start_time, so the switching pause applies after a restart.
         self._last_on_at = {name: float(start_time) for name in SWITCHED_COMMANDS}
         self._isolation_open_since = None
+        self._feed_pump_on_since = None
+        self._valves_closed_since = None
         self._last_written: OutputCommands | None = None
         self._last_time = float(start_time)
 
@@ -173,9 +194,21 @@ class OutputArbiter:
                     self._isolation_open_since = now
             else:
                 self._isolation_open_since = None
+            if getattr(commands, FEED_PUMP_COMMAND):
+                if self._feed_pump_on_since is None:
+                    self._feed_pump_on_since = now
+            else:
+                self._feed_pump_on_since = None
+            if _valves_closed(commands):
+                if self._valves_closed_since is None:
+                    self._valves_closed_since = now
+            else:
+                self._valves_closed_since = None
             self._last_written = commands
         else:
             self._isolation_open_since = None
+            self._feed_pump_on_since = None
+            self._valves_closed_since = None
             self._last_written = None
 
     def possibly_on(self, output: str, now: float) -> bool:
@@ -202,7 +235,9 @@ class OutputArbiter:
         *,
         energy=None,
         plant_safe: bool = False,
+        feed_pump_sequence: bool = False,
     ) -> ArbitrationResult:
+        """feed_pump_sequence: enforce Y3 -> feed pump -> Y4 (AUTO)."""
         if not isinstance(requested, OutputCommands):
             raise TypeError("Expected OutputCommands")
         if not isinstance(permissions, OutputPermissions):
@@ -233,9 +268,6 @@ class OutputArbiter:
             out[name] = _off(out[name])
 
         # 1. Fixed overrides --------------------------------------------
-        if not settings.compressor_enabled:
-            block(COMPRESSOR_COMMAND, "COMPRESSOR_DISABLED",
-                  "Compressor operating strategy not defined")
         if not settings.cabinet_fan_disable_allowed:
             block(FAN_COMMAND, "FAN_DISABLE_NOT_ALLOWED",
                   "Cabinet fan stays under thermostat control")
@@ -245,6 +277,7 @@ class OutputArbiter:
             if not getattr(permissions, name):
                 block(name, "PERMISSION_DENIED",
                       permissions.reason(name) or "No permission")
+        run_on = self._feed_pump_run_on(out, requested, permissions, notes, now)
 
         # 3. Preheat exclusion ------------------------------------------
         heater = settings.preheat_heater
@@ -291,11 +324,62 @@ class OutputArbiter:
                       "Waiting for Y3 to open",
                       settle - (now - self._isolation_open_since))
 
+        if feed_pump_sequence:
+            self._feed_pump_sequence(out, block, now, run_on=run_on)
+
         # 7. Indicators --------------------------------------------------
         out.update(self._indicators(indicators, now))
 
         commands = OutputCommands(**out)
         return ArbitrationResult(commands, requested, tuple(notes))
+
+    def _feed_pump_run_on(self, out, requested, permissions, notes, now) -> bool:
+        """Normal stop: keep the pump on briefly while Y3/Y4 close."""
+        name = FEED_PUMP_COMMAND
+        last = self._last_written
+        if (out[name] or not getattr(permissions, name) or last is None
+                or not getattr(last, name) or not _valves_closed_frame(out)):
+            return False
+        run_on = self.settings.feed_pump_run_on_after_valves_closed_seconds
+        since = self._valves_closed_since
+        closed_for = 0.0 if since is None else now - since
+        if closed_for >= run_on:
+            return False
+        out[name] = True
+        notes.append(ArbitrationNote(
+            output=name, requested=getattr(requested, name), granted=True,
+            rule="FEED_PUMP_RUN_ON",
+            message="Feed pump runs on while Y3/Y4 close",
+            remaining_s=run_on - closed_for))
+        return True
+
+    def _feed_pump_sequence(self, out, block, now, *, run_on=False):
+        """AUTO: Y3 open for its travel time -> pump -> after a delay Y4."""
+        s = self.settings
+        pump = FEED_PUMP_COMMAND
+        if out[pump] and not run_on:
+            wait = s.feed_pump_start_after_isolation_open_seconds
+            since = self._isolation_open_since
+            if not out[ISOLATION_COMMAND]:
+                block(pump, "FEED_PUMP_SEQUENCE", "Feed pump starts only with Y3 requested open")
+            elif since is None:
+                block(pump, "FEED_PUMP_SEQUENCE",
+                      "Waiting for Y3 open command to be written", wait)
+            elif now - since < wait:
+                block(pump, "FEED_PUMP_SEQUENCE", "Waiting for Y3 to open (travel time)",
+                      wait - (now - since))
+        if _active(out[CONTROL_VALVE_COMMAND]):
+            wait = s.feed_pump_control_valve_after_pump_seconds
+            since = self._feed_pump_on_since
+            if not out[pump]:
+                block(CONTROL_VALVE_COMMAND, "FEED_PUMP_NOT_RUNNING",
+                      "Y4 opens only with the feed pump running")
+            elif since is None:
+                block(CONTROL_VALVE_COMMAND, "FEED_PUMP_STARTING",
+                      "Waiting for the feed pump command to be written", wait)
+            elif now - since < wait:
+                block(CONTROL_VALVE_COMMAND, "FEED_PUMP_STARTING",
+                      "Waiting for the feed pump to run", wait - (now - since))
 
     @staticmethod
     def _energy_rule(out, energy, block):

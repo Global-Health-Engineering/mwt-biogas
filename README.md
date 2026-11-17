@@ -27,6 +27,10 @@ Open items
      blocked.
    - PT100 temperature calibration.
    - Valve identification: O_11, O_13, O_14 drive Y3, Y1, Y2.
+   - Effluent feed pump GPST-PU-02 on O_6 (relay K3.3, formerly the biogas
+     compressor): wiring, run direction, flow at the Y4 minimum opening
+     (`feed_pump.min_y4_opening_percent`), Y3 travel time (10 s assumed) and
+     Y4 travel from closed to open within the closed-valve limit.
    - Y4 endpoints: 4-20 mA command against the measured open and closed
      positions.
    - Level-switch positions and drain timings.
@@ -45,7 +49,7 @@ Open items
 |---|---|---|
 | 1 Raw I/O | `hardware.py` (reader, monitoring mode), `hardware_outputs.py` (writer) | Only layer that knows RevPi channel names |
 | 2 Signals | `signals.py`, `levels.py`, `flows.py`, `temperatures.py`, `modes.py`, `valves.py` | Units, validity, debounce, freshness; one `SignalSnapshot` per cycle |
-| 3 Equipment | `transfer_pumps.py`, `transfer_flow.py`, `manhole_drain.py`, `overflow_valves.py`, `heating.py`, `treatment_control.py` | Return requests keyed by `OutputCommands` field names; never write hardware |
+| 3 Equipment | `transfer_pumps.py`, `transfer_flow.py`, `manhole_drain.py`, `overflow_valves.py`, `heating.py`, `treatment_control.py`, `feed_pump.py` | Return requests keyed by `OutputCommands` field names; never write hardware |
 | 4 Process | `controller/` package, `process_state.py`, `arbiter.py`, `fault_manager.py` | One scan cycle: modes, states, faults, permissions; the arbiter turns requests + permissions into one complete `OutputCommands` frame |
 
 Shared: `config.py` and `control_settings.py` (load and validate all
@@ -245,15 +249,33 @@ under load is measured:
 | Switch on | until the last written frame has the heater on; deadline `probe_switch_on_timeout_s` (30 s, longer than the 10 s switching pause) |
 | Settle | `probe_settle_s` (10 s) after it was written on |
 | Measure | the next reading of **each** inverter requested after the settle point (`read_at`; a combined value can still hold an older reading of one inverter); deadline `probe_measure_timeout_s` (30 s) |
+| Load check (3 kW, `probe_load_check_heaters`) | first, at the measurement: the load must have risen by `probe_min_load_rise_fraction` (0.70) x rated power (2100 W) against the last reading before switch-on, else `NO_LOAD` -> off + retry delay, **not** judged on solar (see "3 kW heater draws no power" below) |
 | Pass | solar contribution = (PV - other loads) / heater power >= `probe_min_solar_contribution` (0.70) and combined battery discharge <= `probe_max_battery_discharge_w` (853 W, background loads included) -> keeps heating |
 | Fail / abort | heater off, next probe after `probe_retry_delay_s` (10 min), then only with a heat request and PV: probe failed, a deadline missed, inverter data stale during the probe |
-| Running | contribution too low or discharge too high for `probe_hold_s` (120 s) -> off + retry delay; no inverter data for `communication_timeout_s` (60 s) -> off + retry delay |
+| Running | contribution too low or discharge too high for `probe_hold_s` (120 s) -> off + retry delay; 3 kW: load dropped by 2100 W for `probe_load_loss_s` (20 s) -> `LOAD_LOST`, off + retry delay; no inverter data for `communication_timeout_s` (60 s) -> off + retry delay |
 | Any time | SOC <= `soc_stop_at_percent` (50 %) -> off at once, also during a probe (on the first reading that shows it; inverters are read every 5 s); heat request ended or an interlock -> probe ends without retry delay |
 | Retry now | Solar tab button (COMMISSIONING login, AUTO and MANUAL): ends the retry delay of the heater waiting for it; the next probe still needs the start conditions above (request, current data, SOC >= 70 %, PV, no interlock). Logged as `OPERATOR_ACTION ENERGY_FORCE_RETRY` |
 
 - **Other loads** = combined load - rated power of the heaters on in the last
-  written frame (no double counting). Limit: a heater cut out by its own
-  thermostat is still subtracted.
+  written frame (no double counting). A heater cut out by its own
+  thermostat would still be subtracted; for the 3 kW the load check catches
+  that before the solar verdict.
+
+#### 3 kW heater draws no power: thermostat or fault
+
+The 3 kW heater has its own thermostat (set to 66 °C, its maximum); it
+measures at the element, so it can open with a much lower mixed PT5. When the
+probe reports `NO_LOAD` or `LOAD_LOST` for the 3 kW
+(`pasteurizer/heater_load.py`):
+
+| PT5 | Meaning | Action |
+|---|---|---|
+| valid, >= `preheat.heater_3kw_thermostat_min_pt5_c` (40 °C) | thermostat reached | event `HEATER_3KW_THERMOSTAT` with PT5 (the cut-out temperature can be read from the log); in PREHEAT_3KW / WAITING_FOR_SOLAR the preheat ends: HEAT_UP (biogas circulation, 1 kW). No warning |
+| below 40 °C or invalid | heater fault | Level 1 `HEATER_3KW_NO_LOAD` ("no electrical load registered when testing"); clears with the next test that sees the load, stays in the log. After `preheat.heater_3kw_no_load_fault_count` (3) in a row: Level 2 `HEATER_3KW_NO_LOAD_REPEATED` ("check heater electronics"), 3 kW blocked until reset; AUTO skips or ends the preheat and heats with biogas / 1 kW |
+
+The 1 kW has no thermostat and is not load-checked. Simulator: 3 kW
+thermostat `heater_3kw_thermostat_c` (66 °C, 5 K hysteresis) and fault
+`heater_3kw_dead`. Scenarios 155-160.
 - **Discharge limit**: with consistent readings (PV + battery = load), >= 70 %
   solar contribution means at most 30 % of the heater power from the battery
   (300 W for the 1 kW, 900 W for the 3 kW). For the 3 kW the 853 W limit is
@@ -330,7 +352,7 @@ burner's own controls. All timing below follows the **written** pump output
 **Cold start** (`control_settings.json` `preheat_circulation`): in
 PREHEAT_3KW the 3 kW heater and the circulation run together. The circulation is no longer in
 `arbiter_settings.json` `preheat_exclusion.excluded_outputs`; transfer pumps,
-1 kW, manhole drain and compressor still are. Heater power permissions
+1 kW, manhole drain and the effluent feed pump still are. Heater power permissions
 (solar probe for the 3 kW) and the safety interlocks are unchanged.
 
 | Rule | Setting (provisional) |
@@ -407,6 +429,40 @@ only, never an interlock):
 - Simulator: PT6 reads 3 K above PT5 while circulating with gas;
   `biogas_power_w = 0` is the gas-off case. Scenarios 127-144.
 
+### Effluent feed pump GPST-PU-02
+
+The effluent feed pump (`effluent_feed_pump`, O_6, the former biogas
+compressor relay K3.3; the compressor output no longer exists) pushes
+effluent from the buffer tank PST-TK-01 through PST-FI-01, the heat
+recovery and the pasteurizer to Y3/Y4. It has no running feedback; all
+timing follows the written output.
+
+| Rule | Setting (provisional) |
+|---|---|
+| AUTO start: Y3 written open, then the pump after the Y3 travel time | `arbiter_settings.json` `feed_pump.start_after_isolation_open_seconds` 10 s |
+| AUTO start: Y4 opens only while the pump runs, after | `feed_pump.control_valve_after_pump_seconds` 2 s |
+| Normal stop (leaving treatment, STOPPING, selector OFF): Y3/Y4 close in one frame, the pump runs on | `feed_pump.run_on_after_valves_closed_seconds` 2 s (fixed time, no wait for Y4 feedback) |
+| Trips, dry run, closed-valve cutoff, invalid selector or acquisition: pump off in the same frame as Y3/Y4 | permission withdrawn |
+| Closed-valve protection (AUTO and MANUAL): pump on with Y3 not written open, or Y4 feedback invalid or at or below `start.y4_closed_tolerance_percent` (3 %) | `control_settings.json` `feed_pump.closed_valve_max_s` 10 s |
+| Dry run: buffer tank low switch PST-LS-01 not reached | pump not permitted (AUTO and MANUAL) |
+| Y4 minimum opening while treating (both Y4 controllers) | `feed_pump.min_y4_opening_percent` 5 % (must be above the 3 % closed tolerance) |
+| Y4 at the minimum and the controller still closing: treatment stops (normal sequence), counts as an interruption | `feed_pump.min_opening_hold_s` 60 s |
+
+- Closed-valve cutoff: Level 1 warning `FEED_PUMP_CLOSED_VALVES`, not
+  latched. AUTO: treatment returns to its waiting state (interruption, the
+  normal retry rules apply); the next treatment start re-arms the pump and
+  clears the warning. MANUAL: the pump request is withdrawn
+  (`MANUAL_RELEASE_AUTOMATIC`); a new press re-arms it.
+- Minimum-opening stop: Level 1 warning `Y4_AT_MINIMUM_OPENING` until the
+  next treatment start. The PT3 < 65 °C stop is unchanged and faster.
+- MANUAL does not force the Y3 -> pump -> Y4 order, so Y3/Y4 and the pump can
+  be tested separately; Y4 still waits 10 s for Y3. Releasing the pump in
+  MANUAL with the valves open switches it off at once.
+- The pump is in the 3 kW preheat exclusion (with the switching pause), as
+  the compressor was.
+- Simulator: feed flow (flow sensor 3) only with the pump on, Y3 open and Y4
+  above 0 %. Scenarios 5, 147-154.
+
 ## Controller on the RevPi (production: outputs enabled)
 
 Once, on the RevPi:
@@ -458,7 +514,9 @@ logs/controller.sqlite` in two terminals.
   expiry or a mode change; test the pump with the LS1 override "Force
   reached"); heaters wait 10 s after start and after each other (switching
   pause, break-before-make); Y4 waits for Y3; AUTO starts only with
-  buffer-tank supply.
+  buffer-tank supply; the effluent feed pump needs the buffer tank low switch
+  reached and is switched off after 10 s against a closed Y3 or Y4 (request
+  withdrawn, press again).
 - Valve outputs O_11 (Y3), O_13 (Y1), O_14 (Y2) are marked "identity
   pending" until checked; the Manual tab is the way to check them.
 - `--outputs disabled` (diagnostic): the same logic, nothing is written

@@ -60,6 +60,7 @@ EQUIPMENT = [
        "command+feedback", "%"),
     _e("pasteurizer_isolation_open", "GPST-VL-08", "Pasteurizer isolation valve Y3",
        "pasteurizer", "command"),
+    _e("effluent_feed_pump", "GPST-PU-02", "Effluent feed pump", "pasteurizer", "command"),
     _e("burner", "GPST-GB-01", "Biogas water heater (flame not monitored)", "pasteurizer",
        "not_monitored"),
     _e("manual_GPST-VL-07", "GPST-VL-07", "Manual drain valve", "pasteurizer", "manual"),
@@ -69,7 +70,6 @@ EQUIPMENT = [
     # Plant-wide (header and details)
     _e("cabinet_fan_disabled", "M1", "Cabinet fan (thermostat control unless disabled)",
        "plant", "command"),
-    _e("biogas_compressor", "M3.3", "Biogas compressor (held off)", "plant", "command"),
     _e("mode_selector", "S1", "Mode selector", "plant", "measured"),
     # Cabinet lights: no P&ID tag, shown by name only
     _e("light_green", "Green light", "Cabinet light: pasteurizing", "plant", "command"),
@@ -79,6 +79,9 @@ EQUIPMENT = [
 
 for _light in EQUIPMENT[-3:]:
     _light["confirmed"] = None     # display names only, not a P&ID mapping
+
+# Added 17 Nov 2026 on O_6 (former compressor relay): mapping not yet verified.
+next(e for e in EQUIPMENT if e["id"] == "effluent_feed_pump")["confirmed"] = None
 
 BY_ID = {e["id"]: e for e in EQUIPMENT}
 

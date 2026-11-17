@@ -164,7 +164,7 @@ function renderEquipment() {
 function treatmentWord(st) {
   const s = st.state;
   if (s === "TRIPPED") return ["Tripped", "crit"];
-  if (s === "MODEL_TREATMENT" || s === "FALLBACK_TREATMENT") return st.release_permitted ? ["Treatment enabled", "ok"] : ["Opening (Y3 delay)", "wait"];
+  if (s === "MODEL_TREATMENT" || s === "FALLBACK_TREATMENT") return st.release_permitted ? ["Treatment enabled", "ok"] : ["Opening: Y3, feed pump, then Y4", "wait"];
   if (s === "READY" || s === "FALLBACK_QUALIFY") return ["Qualifying", "wait"];
   if (s === "WAITING_FOR_SOLAR") return ["Waiting for solar power to preheat", "wait"];
   if (s === "PREHEAT_3KW" || s === "HEAT_UP") return ["Heating, waiting to qualify", "wait"];
